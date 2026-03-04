@@ -22,6 +22,7 @@ void main() {
     late bool sawAudioBytes;
     int? lastRequestedGpuLayers;
     int? lastBridgeLogLevel;
+    bool? lastEmitCurrentTextOnToken;
     WebGpuBridgeConfig? lastBridgeConfig;
 
     void clearBridgeGlobals() {
@@ -49,6 +50,7 @@ void main() {
       sawAudioBytes = false;
       lastRequestedGpuLayers = null;
       lastBridgeLogLevel = null;
+      lastEmitCurrentTextOnToken = null;
       lastBridgeConfig = null;
 
       bridge.setProperty(
@@ -68,6 +70,14 @@ void main() {
       bridge.setProperty(
         'createCompletion'.toJS,
         ((String prompt, JSObject opts) {
+          final emitCurrentTextRaw = opts.getProperty(
+            'emitCurrentTextOnToken'.toJS,
+          );
+          if (emitCurrentTextRaw.isA<JSBoolean>()) {
+            lastEmitCurrentTextOnToken =
+                (emitCurrentTextRaw as JSBoolean).toDart;
+          }
+
           final parts = opts.getProperty('parts'.toJS);
           if (parts.isA<JSArray>() && (parts as JSArray).length > 0) {
             sawMediaParts = true;
@@ -253,6 +263,7 @@ void main() {
 
       expect(chunks, isNotEmpty);
       expect(chunks.first, <int>[72, 101, 108, 108, 111]);
+      expect(lastEmitCurrentTextOnToken, isFalse);
     });
 
     test('generates embedding vector from bridge', () async {
@@ -556,6 +567,14 @@ void main() {
       bridge.setProperty(
         'createCompletion'.toJS,
         ((String prompt, JSObject opts) {
+          final emitCurrentTextRaw = opts.getProperty(
+            'emitCurrentTextOnToken'.toJS,
+          );
+          if (emitCurrentTextRaw.isA<JSBoolean>()) {
+            lastEmitCurrentTextOnToken =
+                (emitCurrentTextRaw as JSBoolean).toDart;
+          }
+
           final onToken = opts.getProperty('onToken'.toJS) as JSFunction?;
           if (onToken != null) {
             final firstPiece = JSUint8Array.withLength(2);
@@ -587,6 +606,7 @@ void main() {
       final output = utf8.decode(chunks.expand((b) => b).toList());
       expect(output, 'hi');
       expect(output.contains('<|im_end|>'), isFalse);
+      expect(lastEmitCurrentTextOnToken, isTrue);
     });
 
     test('throws when bridge load fails', () async {

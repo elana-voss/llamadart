@@ -105,8 +105,9 @@ class DownloadableModel {
         temperature: 0.6,
         topK: 20,
         topP: 0.95,
-        contextSize: 8192,
+        contextSize: 4096,
         maxTokens: 1024,
+        thinkingEnabled: false,
       ),
     ),
     DownloadableModel(

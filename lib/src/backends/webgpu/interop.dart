@@ -158,6 +158,7 @@ extension type WebGpuCompletionOptions._(JSObject _) implements JSObject {
     int? seed,
     String? grammar,
     @JS('onToken') JSFunction? onToken,
+    @JS('emitCurrentTextOnToken') bool? emitCurrentTextOnToken,
     JSArray? parts,
     JSAny? signal,
   });

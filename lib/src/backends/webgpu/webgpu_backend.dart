@@ -1276,9 +1276,14 @@ class WebGpuLlamaBackend
     final controller = StreamController<List<int>>();
     _abortController = AbortController();
     var emittedLength = 0;
+    final hasStopSequences = params.stopSequences.any(
+      (stop) => stop.isNotEmpty,
+    );
 
     final onToken = (JSAny? piece, JSAny? currentText) {
-      if (currentText != null && currentText.isA<JSString>()) {
+      if (hasStopSequences &&
+          currentText != null &&
+          currentText.isA<JSString>()) {
         final fullText = (currentText as JSString).toDart;
         if (fullText.length < emittedLength) {
           emittedLength = 0;
@@ -1336,6 +1341,7 @@ class WebGpuLlamaBackend
       seed: params.seed ?? DateTime.now().millisecondsSinceEpoch,
       grammar: params.grammar,
       onToken: onToken as JSFunction,
+      emitCurrentTextOnToken: hasStopSequences,
       parts: mediaParts,
       signal: _abortController?.signal,
     );

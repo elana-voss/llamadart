@@ -1119,6 +1119,30 @@ class ChatProvider extends ChangeNotifier {
       );
     }
 
+    if (runtimeNotes.contains('threads_capped_no_pthread')) {
+      _addInfoMessage(
+        'Loaded bridge core does not include pthread support, so runtime threads are capped to 1. '
+        'Use pthread-enabled bridge assets for faster text and multimodal generation.',
+      );
+    }
+
+    final runtimeThreads = _runtimeThreads;
+    if (runtimeThreads != null && runtimeThreads <= 1) {
+      if (_settings.thinkingEnabled && _settings.contextSize > 4096) {
+        _addInfoMessage(
+          'Single-thread web runtime detected. For faster text generation, disable thinking and lower context to 4096.',
+        );
+      } else if (_settings.thinkingEnabled) {
+        _addInfoMessage(
+          'Single-thread web runtime detected. Disable thinking mode to improve text throughput.',
+        );
+      } else if (_settings.contextSize > 4096) {
+        _addInfoMessage(
+          'Single-thread web runtime detected. Reducing context size to 4096 usually improves throughput.',
+        );
+      }
+    }
+
     final poolCapNote = runtimeNotes.firstWhere(
       (note) => note.startsWith('threads_capped_pool:'),
       orElse: () => '',
