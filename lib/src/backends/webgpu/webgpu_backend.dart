@@ -25,6 +25,9 @@ class WebGpuLlamaBackend
   static const int _defaultRemoteFetchChunkBytes = 4 * 1024 * 1024;
   static const int _minRemoteFetchChunkBytes = 4 * 1024;
   static const int _maxRemoteFetchChunkBytes = 16 * 1024 * 1024;
+  static const int _cpuMultimodalMediaMaxPredict = 192;
+  static const int _cpuMultimodalMaxImagePixels = 307200;
+  static const int _cpuMultimodalMaxImageEdge = 768;
 
   final String? _bridgeScriptUrl;
   final String? _bridgeWasmUrl;
@@ -573,6 +576,10 @@ class WebGpuLlamaBackend
     required ModelParams params,
   }) {
     if (params.batchSize > 0 || params.microBatchSize > 0) {
+      return (nBatch: null, nUbatch: null);
+    }
+
+    if (params.preferredBackend == GpuBackend.cpu || params.gpuLayers == 0) {
       return (nBatch: null, nUbatch: null);
     }
 
@@ -1292,6 +1299,28 @@ class WebGpuLlamaBackend
     return index == 0 ? null : jsParts;
   }
 
+  bool _isCpuRuntimeForMultimodal(LlamaWebGpuBridge bridge) {
+    try {
+      final metadata = bridge.getModelMetadata();
+      if (metadata != null) {
+        final raw = metadata.getProperty('llamadart.webgpu.n_gpu_layers'.toJS);
+        final parsed = int.tryParse(_jsValueAsString(raw) ?? '');
+        if (parsed != null) {
+          return parsed == 0;
+        }
+      }
+    } catch (_) {
+      // Fall through to runtime GPU-active probe.
+    }
+
+    final gpuActive = bridge.isGpuActive();
+    if (gpuActive != null) {
+      return !gpuActive;
+    }
+
+    return false;
+  }
+
   @override
   Stream<List<int>> generate(
     int contextHandle,
@@ -1307,6 +1336,25 @@ class WebGpuLlamaBackend
     }
 
     final bridge = _requireBridge();
+    final isCpuMultimodalRuntime =
+        mediaParts != null && _isCpuRuntimeForMultimodal(bridge);
+    final mediaMaxPredict = isCpuMultimodalRuntime
+        ? math.max(
+            32,
+            math.min(
+              params.maxTokens > 0
+                  ? params.maxTokens
+                  : _cpuMultimodalMediaMaxPredict,
+              _cpuMultimodalMediaMaxPredict,
+            ),
+          )
+        : null;
+    final mediaMaxImagePixels = isCpuMultimodalRuntime
+        ? _cpuMultimodalMaxImagePixels
+        : null;
+    final mediaMaxImageEdge = isCpuMultimodalRuntime
+        ? _cpuMultimodalMaxImageEdge
+        : null;
 
     final controller = StreamController<List<int>>();
     _abortController = AbortController();
@@ -1375,12 +1423,15 @@ class WebGpuLlamaBackend
 
     final options = WebGpuCompletionOptions(
       nPredict: params.maxTokens,
+      mediaMaxPredict: mediaMaxPredict,
       temp: params.temp,
       topK: params.topK,
       topP: params.topP,
       penalty: params.penalty,
       seed: params.seed ?? DateTime.now().millisecondsSinceEpoch,
       grammar: params.grammar,
+      mediaMaxImagePixels: mediaMaxImagePixels,
+      mediaMaxImageEdge: mediaMaxImageEdge,
       onToken: onToken as JSFunction,
       emitCurrentTextOnToken: hasStopSequences,
       tokenEventEncoding: 'text',

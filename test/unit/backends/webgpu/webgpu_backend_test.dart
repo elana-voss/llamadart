@@ -24,12 +24,17 @@ void main() {
     int? lastRequestedThreadsBatch;
     int? lastRequestedBatchSize;
     int? lastRequestedMicroBatchSize;
+    int? lastMediaMaxPredict;
+    int? lastMediaMaxImagePixels;
+    int? lastMediaMaxImageEdge;
     int? lastBridgeLogLevel;
     bool? lastEmitCurrentTextOnToken;
     String? lastTokenEventEncoding;
     int? lastTokenEventFlushMs;
     int? lastTokenEventFlushChars;
     WebGpuBridgeConfig? lastBridgeConfig;
+    late int runtimeGpuLayers;
+    late bool runtimeGpuActive;
 
     void clearBridgeGlobals() {
       globalContext.delete('LlamaWebGpuBridge'.toJS);
@@ -58,12 +63,17 @@ void main() {
       lastRequestedThreadsBatch = null;
       lastRequestedBatchSize = null;
       lastRequestedMicroBatchSize = null;
+      lastMediaMaxPredict = null;
+      lastMediaMaxImagePixels = null;
+      lastMediaMaxImageEdge = null;
       lastBridgeLogLevel = null;
       lastEmitCurrentTextOnToken = null;
       lastTokenEventEncoding = null;
       lastTokenEventFlushMs = null;
       lastTokenEventFlushChars = null;
       lastBridgeConfig = null;
+      runtimeGpuLayers = 99;
+      runtimeGpuActive = true;
 
       bridge.setProperty(
         'loadModelFromUrl'.toJS,
@@ -126,6 +136,27 @@ void main() {
           if (tokenEventFlushCharsRaw.isA<JSNumber>()) {
             lastTokenEventFlushChars =
                 (tokenEventFlushCharsRaw as JSNumber).toDartInt;
+          }
+
+          final mediaMaxPredictRaw = opts.getProperty('mediaMaxPredict'.toJS);
+          if (mediaMaxPredictRaw.isA<JSNumber>()) {
+            lastMediaMaxPredict = (mediaMaxPredictRaw as JSNumber).toDartInt;
+          }
+
+          final mediaMaxImagePixelsRaw = opts.getProperty(
+            'mediaMaxImagePixels'.toJS,
+          );
+          if (mediaMaxImagePixelsRaw.isA<JSNumber>()) {
+            lastMediaMaxImagePixels =
+                (mediaMaxImagePixelsRaw as JSNumber).toDartInt;
+          }
+
+          final mediaMaxImageEdgeRaw = opts.getProperty(
+            'mediaMaxImageEdge'.toJS,
+          );
+          if (mediaMaxImageEdgeRaw.isA<JSNumber>()) {
+            lastMediaMaxImageEdge =
+                (mediaMaxImageEdgeRaw as JSNumber).toDartInt;
           }
 
           final parts = opts.getProperty('parts'.toJS);
@@ -247,12 +278,16 @@ void main() {
         (() {
           final meta = JSObject();
           meta.setProperty('general.architecture'.toJS, 'llama'.toJS);
+          meta.setProperty(
+            'llamadart.webgpu.n_gpu_layers'.toJS,
+            runtimeGpuLayers.toString().toJS,
+          );
           return meta;
         }).toJS,
       );
 
       bridge.setProperty('getContextSize'.toJS, (() => 4096).toJS);
-      bridge.setProperty('isGpuActive'.toJS, (() => true).toJS);
+      bridge.setProperty('isGpuActive'.toJS, (() => runtimeGpuActive).toJS);
       bridge.setProperty('getBackendName'.toJS, (() => 'WebGPU (Mock)').toJS);
       bridge.setProperty('cancel'.toJS, (() {}).toJS);
       bridge.setProperty(
@@ -322,6 +357,20 @@ void main() {
 
       expect(lastRequestedBatchSize, 768);
       expect(lastRequestedMicroBatchSize, 256);
+    });
+
+    test('does not apply qwen3.5-0.8b batch tuning in CPU mode', () async {
+      await backend.modelLoadFromUrl(
+        'https://example.com/Qwen_Qwen3.5-0.8B-Q4_K_M.gguf',
+        const ModelParams(
+          contextSize: 4096,
+          preferredBackend: GpuBackend.cpu,
+          gpuLayers: 0,
+        ),
+      );
+
+      expect(lastRequestedBatchSize, isNull);
+      expect(lastRequestedMicroBatchSize, isNull);
     });
 
     test('streams generated tokens from bridge callback', () async {
@@ -822,6 +871,39 @@ void main() {
       await backend.multimodalContextFree(mmHandle);
       expect(mmLoaded, isFalse);
       expect(await backend.supportsVision(mmHandle), isFalse);
+    });
+
+    test('applies CPU multimodal image and token caps', () async {
+      runtimeGpuLayers = 0;
+      runtimeGpuActive = false;
+
+      await backend.modelLoadFromUrl(
+        'https://example.com/model.gguf',
+        const ModelParams(preferredBackend: GpuBackend.cpu, gpuLayers: 0),
+      );
+
+      final mmHandle = await backend.multimodalContextCreate(
+        1,
+        'https://example.com/mmproj.gguf',
+      );
+
+      expect(mmHandle, isNotNull);
+
+      final chunks = await backend
+          .generate(
+            1,
+            'Describe this image',
+            const GenerationParams(maxTokens: 1024),
+            parts: <LlamaContentPart>[
+              LlamaImageContent(bytes: Uint8List.fromList(<int>[1, 2, 3])),
+            ],
+          )
+          .toList();
+
+      expect(chunks, isNotEmpty);
+      expect(lastMediaMaxPredict, 192);
+      expect(lastMediaMaxImagePixels, 307200);
+      expect(lastMediaMaxImageEdge, 768);
     });
 
     test('reports audio support and forwards audio parts', () async {

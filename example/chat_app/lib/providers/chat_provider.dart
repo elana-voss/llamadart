@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -805,7 +806,15 @@ class ChatProvider extends ChangeNotifier {
     }
 
     if (_mmprojLoaded) {
-      return true;
+      final runtimeSupportsVision = await _chatService.engine.supportsVision;
+      final runtimeSupportsAudio = await _chatService.engine.supportsAudio;
+      if (runtimeSupportsVision || runtimeSupportsAudio) {
+        _supportsVision = runtimeSupportsVision;
+        _supportsAudio = runtimeSupportsAudio;
+        return true;
+      }
+
+      _mmprojLoaded = false;
     }
 
     final mmprojPath = (_settings.mmprojPath ?? '').trim();
@@ -866,6 +875,8 @@ class ChatProvider extends ChangeNotifier {
     );
     _lastFirstTokenLatencyMs = null;
     final toolsForTurn = _toolsForTurn();
+    var hasMediaPartsInTurn = false;
+    var isCpuMultimodalTurn = false;
 
     try {
       _messages.add(ChatMessage(text: "...", isUser: false));
@@ -878,14 +889,34 @@ class ChatProvider extends ChangeNotifier {
         text: text,
         stagedParts: parts,
       );
-      final hasMediaPartsInTurn = chatParts.any(
+      hasMediaPartsInTurn = chatParts.any(
         (part) => part is LlamaImageContent || part is LlamaAudioContent,
       );
+      final resolvedGpuLayers = _runtimeGpuLayers;
+      final runtimeLooksCpu = resolvedGpuLayers != null
+          ? resolvedGpuLayers <= 0
+          : _settings.preferredBackend == GpuBackend.cpu;
+      isCpuMultimodalTurn = hasMediaPartsInTurn && runtimeLooksCpu;
+      final effectiveParams = isCpuMultimodalTurn
+          ? params.copyWith(maxTokens: math.min(params.maxTokens, 192))
+          : params;
       final streamStallTimeout = kIsWeb
-          ? Duration(seconds: hasMediaPartsInTurn ? 120 : 75)
+          ? Duration(
+              seconds: hasMediaPartsInTurn
+                  ? (isCpuMultimodalTurn ? 150 : 120)
+                  : 75,
+            )
           : const Duration(seconds: 180);
+      final cpuMultimodalWallSeconds = math.max(
+        180,
+        math.min(420, effectiveParams.maxTokens * 2),
+      );
       final streamWallTimeout = kIsWeb
-          ? Duration(seconds: hasMediaPartsInTurn ? 95 : 130)
+          ? Duration(
+              seconds: hasMediaPartsInTurn
+                  ? (isCpuMultimodalTurn ? cpuMultimodalWallSeconds : 180)
+                  : 130,
+            )
           : const Duration(seconds: 240);
 
       final templateKwargs = _thinkingTemplateKwargs();
@@ -895,7 +926,7 @@ class ChatProvider extends ChangeNotifier {
           .consumeStream(
             stream: _session!.create(
               chatParts,
-              params: params,
+              params: effectiveParams,
               tools: toolsForTurn,
               toolChoice: toolsForTurn != null ? ToolChoice.auto : null,
               enableThinking: _settings.thinkingEnabled,
@@ -1016,9 +1047,11 @@ class ChatProvider extends ChangeNotifier {
         _chatService.cancelGeneration();
         _messages.add(
           ChatMessage(
-            text:
-                'Generation timed out waiting for model output. The request was cancelled. '
-                'Try lowering GPU layers (e.g. 16 or 0) and resending.',
+            text: hasMediaPartsInTurn && isCpuMultimodalTurn
+                ? 'CPU multimodal generation timed out before completion. '
+                      'Try lowering Max generated tokens or sending a smaller image and retrying.'
+                : 'Generation timed out waiting for model output. The request was cancelled. '
+                      'Try lowering Max generated tokens for multimodal prompts and resending.',
             isUser: false,
             isInfo: true,
           ),
@@ -1029,6 +1062,16 @@ class ChatProvider extends ChangeNotifier {
             text:
                 'Multimodal worker failed in this browser session. '
                 'Reload model and retry with a smaller image, or disable mmproj for text-only chat.',
+            isUser: false,
+            isInfo: true,
+          ),
+        );
+      } else if (errorText.contains('CPU multimodal request failed')) {
+        _messages.add(
+          ChatMessage(
+            text:
+                'CPU multimodal inference failed before producing tokens. '
+                'Reload model and retry with a smaller image.',
             isUser: false,
             isInfo: true,
           ),
@@ -1152,6 +1195,16 @@ class ChatProvider extends ChangeNotifier {
           'Single-thread web runtime detected. Reducing context size to 4096 usually improves throughput.',
         );
       }
+    }
+
+    final runtimeGpuLayers = _runtimeGpuLayers;
+    if (_settings.preferredBackend != GpuBackend.cpu &&
+        runtimeGpuLayers != null &&
+        runtimeGpuLayers <= 0) {
+      _addInfoMessage(
+        'Web runtime is currently operating in CPU mode (resolved GPU layers = 0). '
+        'Reload model after backend changes or lower context/GPU layers to avoid fallback.',
+      );
     }
 
     final poolCapNote = runtimeNotes.firstWhere(

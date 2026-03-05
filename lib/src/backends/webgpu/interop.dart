@@ -154,12 +154,15 @@ extension type WebGpuCompletionOptions._(JSObject _) implements JSObject {
   /// Creates completion options.
   external factory WebGpuCompletionOptions({
     @JS('nPredict') int? nPredict,
+    @JS('mediaMaxPredict') int? mediaMaxPredict,
     double? temp,
     @JS('topK') int? topK,
     @JS('topP') double? topP,
     double? penalty,
     int? seed,
     String? grammar,
+    @JS('mediaMaxImagePixels') int? mediaMaxImagePixels,
+    @JS('mediaMaxImageEdge') int? mediaMaxImageEdge,
     @JS('onToken') JSFunction? onToken,
     @JS('emitCurrentTextOnToken') bool? emitCurrentTextOnToken,
     @JS('tokenEventEncoding') String? tokenEventEncoding,
