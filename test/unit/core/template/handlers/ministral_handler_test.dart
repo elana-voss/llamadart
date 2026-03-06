@@ -113,6 +113,16 @@ void main() {
     expect(parsed.toolCalls, isEmpty);
     expect(parsed.content, equals(input));
   });
+
+  test('keeps content when bare name+json payload has trailing junk', () {
+    final handler = MinistralHandler();
+    const input = 'get_time{"city":"Seoul"} trailing';
+
+    final parsed = handler.parse(input);
+
+    expect(parsed.toolCalls, isEmpty);
+    expect(parsed.content, equals(input));
+  });
 }
 
 Future<Object?> _noop(_) async {

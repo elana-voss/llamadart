@@ -47,6 +47,15 @@ void main() {
     expect(invalid.content, equals('[TOOL_CALLS] not-json'));
     expect(invalid.toolCalls, isEmpty);
 
+    final malformedItem = handler.parse(
+      '[TOOL_CALLS] [{"arguments":{"city":"Seoul"}}]',
+    );
+    expect(
+      malformedItem.content,
+      equals('[TOOL_CALLS] [{"arguments":{"city":"Seoul"}}]'),
+    );
+    expect(malformedItem.toolCalls, isEmpty);
+
     final markerMissing = handler.parse(
       '[{"name":"get_weather","arguments":{"city":"Seoul"}}]',
     );

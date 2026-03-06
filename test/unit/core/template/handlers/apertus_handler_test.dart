@@ -48,6 +48,30 @@ void main() {
       containsPair('city', 'Seoul'),
     );
   });
+
+  test('ApertusHandler keeps malformed tool arrays as content', () {
+    final handler = ApertusHandler();
+    const input =
+        '<|tools_prefix|>[{"get_weather":{"city":"Seoul"}},{"bad":{},"extra":true}]<|tools_suffix|>';
+
+    final parsed = handler.parse(input);
+
+    expect(parsed.toolCalls, isEmpty);
+    expect(parsed.content, equals(input));
+  });
+
+  test(
+    'ApertusHandler keeps malformed prefixed payload when suffix is missing',
+    () {
+      final handler = ApertusHandler();
+      const input = '<|tools_prefix|>[{"get_weather":{"city":"Seoul"}}]';
+
+      final parsed = handler.parse(input);
+
+      expect(parsed.toolCalls, isEmpty);
+      expect(parsed.content, equals(input));
+    },
+  );
 }
 
 Future<Object?> _noop(_) async {

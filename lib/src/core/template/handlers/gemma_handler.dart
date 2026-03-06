@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
@@ -10,6 +8,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../tool_call_fallback_parser.dart';
+import '../tool_call_parsing_utils.dart';
 import '../tool_call_grammar_utils.dart';
 
 /// Handler for Gemma 3 / Gemma 3n models.
@@ -88,37 +87,33 @@ class GemmaHandler extends ChatTemplateHandler {
 
       final matches = regex.allMatches(trimmed);
       for (var i = 0; i < matches.length; i++) {
-        try {
-          final raw = matches.elementAt(i).group(0)!;
-          final json = jsonDecode(raw) as Map<String, dynamic>;
-          final toolCall = _toMap(json['tool_call']);
-          if (toolCall != null) {
-            final name = _extractToolName(toolCall);
-            final args = _extractToolArguments(json, toolCall);
-            if (name != null) {
-              final argsMap = normalizeFallbackToolArguments(
-                _toArgumentsObject(args),
-              );
-              final normalizedName = normalizeFallbackToolName(
-                name,
-                arguments: argsMap,
-              );
+        final raw = matches.elementAt(i).group(0)!;
+        final json = ToolCallParsingUtils.decodeJsonObject(raw);
+        final toolCall = json == null
+            ? null
+            : ToolCallParsingUtils.coerceMap(json['tool_call']);
+        if (toolCall != null) {
+          final name = _extractToolName(toolCall);
+          final args = _extractToolArguments(json!, toolCall);
+          if (name != null) {
+            final argsMap = normalizeFallbackToolArguments(
+              _toArgumentsObject(args),
+            );
+            final normalizedName = normalizeFallbackToolName(
+              name,
+              arguments: argsMap,
+            );
 
-              toolCalls.add(
-                LlamaCompletionChunkToolCall(
-                  index: i,
-                  id: 'call_$i',
-                  type: 'function',
-                  function: LlamaCompletionChunkFunction(
-                    name: normalizedName,
-                    arguments: jsonEncode(argsMap),
-                  ),
-                ),
-              );
-            }
+            toolCalls.add(
+              ToolCallParsingUtils.createFunctionToolCall(
+                index: i,
+                name: normalizedName,
+                arguments: argsMap,
+              ),
+            );
           }
-          contentText = contentText.replaceAll(raw, '');
-        } catch (_) {}
+        }
+        contentText = contentText.replaceAll(raw, '');
       }
     }
 
@@ -136,23 +131,14 @@ class GemmaHandler extends ChatTemplateHandler {
     );
   }
 
-  Map<String, dynamic>? _toMap(Object? raw) {
-    if (raw is Map<String, dynamic>) {
-      return raw;
-    }
-    if (raw is Map) {
-      return Map<String, dynamic>.from(raw);
-    }
-    return null;
-  }
-
   Map<String, dynamic> _toArgumentsObject(Object? raw) {
     if (raw == null) {
       return const <String, dynamic>{};
     }
 
-    if (raw is Map) {
-      return Map<String, dynamic>.from(raw);
+    final map = ToolCallParsingUtils.coerceMap(raw);
+    if (map != null) {
+      return map;
     }
 
     if (raw is String) {
@@ -179,7 +165,7 @@ class GemmaHandler extends ChatTemplateHandler {
       }
     }
 
-    final nestedFunction = _toMap(toolCall['function']);
+    final nestedFunction = ToolCallParsingUtils.coerceMap(toolCall['function']);
     final nestedName = nestedFunction?['name'];
     if (nestedName is String && nestedName.trim().isNotEmpty) {
       return nestedName.trim();
@@ -206,7 +192,7 @@ class GemmaHandler extends ChatTemplateHandler {
       }
     }
 
-    final nestedFunction = _toMap(toolCall['function']);
+    final nestedFunction = ToolCallParsingUtils.coerceMap(toolCall['function']);
     if (nestedFunction != null) {
       for (final key in argsKeys) {
         if (nestedFunction.containsKey(key) && nestedFunction[key] != null) {

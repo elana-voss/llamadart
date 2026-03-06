@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
@@ -11,6 +9,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 import '../tool_call_grammar_utils.dart';
 
 /// Handler for LFM2 (Liquid Foundation Model 2) format.
@@ -189,36 +188,15 @@ class Lfm2Handler extends ChatTemplateHandler {
     final matches = toolCallRegex.allMatches(output);
     for (var i = 0; i < matches.length; i++) {
       final match = matches.elementAt(i);
-      try {
-        final decoded = jsonDecode(match.group(1)!);
-        if (decoded is! List) {
-          continue;
-        }
-
-        for (final item in decoded) {
-          if (item is! Map) {
-            continue;
-          }
-          final toolCall = Map<String, dynamic>.from(item);
-          final name = toolCall['name'];
-          if (name is! String || name.isEmpty) {
-            continue;
-          }
-          final args = toolCall['arguments'];
-          toolCalls.add(
-            LlamaCompletionChunkToolCall(
-              index: toolCalls.length,
-              id: 'call_${toolCalls.length}',
-              type: 'function',
-              function: LlamaCompletionChunkFunction(
-                name: name,
-                arguments: args is String ? args : jsonEncode(args ?? {}),
-              ),
-            ),
-          );
-        }
-      } catch (_) {
-        // Keep content unchanged when payload is malformed.
+      final decoded = ToolCallParsingUtils.decodeJsonValue(match.group(1)!);
+      final parsedCalls = ToolCallParsingUtils.parseToolCallArray(
+        decoded,
+        startIndex: toolCalls.length,
+        failOnInvalidItem: false,
+        assignFallbackIds: true,
+      );
+      if (parsedCalls != null) {
+        toolCalls.addAll(parsedCalls);
       }
       contentText = contentText.replaceAll(match.group(0)!, '');
     }

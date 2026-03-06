@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../models/chat/chat_message.dart';
@@ -8,6 +6,7 @@ import '../models/tools/tool_definition.dart';
 import 'chat_format.dart';
 import 'chat_parse_result.dart';
 import 'template_internal_metadata.dart';
+import 'tool_call_parsing_utils.dart';
 
 /// Abstract base class for per-format chat template handlers.
 ///
@@ -171,9 +170,10 @@ abstract class ChatTemplateHandler {
     final rawKwargs = metadata[internalChatTemplateKwargsMetadataKey];
     if (rawKwargs != null && rawKwargs.trim().isNotEmpty) {
       try {
-        final decoded = jsonDecode(rawKwargs);
-        if (decoded is Map) {
-          context.addAll(Map<String, dynamic>.from(decoded));
+        final decoded = ToolCallParsingUtils.decodeJsonValue(rawKwargs);
+        final kwargs = ToolCallParsingUtils.coerceMap(decoded);
+        if (kwargs != null) {
+          context.addAll(kwargs);
         }
       } catch (_) {
         // Ignore invalid internal metadata payloads and render without extras.

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
@@ -13,6 +11,7 @@ import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../template_internal_metadata.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Functionary v3.2 format.
 ///
@@ -167,7 +166,7 @@ class FunctionaryV32Handler extends ChatTemplateHandler {
           cursor < output.length && output.codeUnitAt(cursor) == 0x7B;
 
       if (atJsonStart || !allowRawPython) {
-        final jsonRange = _extractJsonObject(output, cursor);
+        final jsonRange = _extractJsonObjectRange(output, cursor);
         if (jsonRange == null) {
           if (!isPartial) {
             parseFailed = true;
@@ -175,16 +174,12 @@ class FunctionaryV32Handler extends ChatTemplateHandler {
           break;
         }
 
-        final jsonText = output.substring(jsonRange.start, jsonRange.end);
+        final jsonText = output.substring(cursor, jsonRange.end);
         toolCalls.add(
-          LlamaCompletionChunkToolCall(
+          ToolCallParsingUtils.createFunctionToolCall(
             index: toolCalls.length,
-            id: 'call_${toolCalls.length}',
-            type: 'function',
-            function: LlamaCompletionChunkFunction(
-              name: name,
-              arguments: _normalizeArguments(jsonText),
-            ),
+            name: name,
+            arguments: _normalizeArguments(jsonText),
           ),
         );
         cursor = jsonRange.end;
@@ -199,14 +194,10 @@ class FunctionaryV32Handler extends ChatTemplateHandler {
 
       final rawCode = output.substring(cursor);
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: toolCalls.length,
-          id: 'call_${toolCalls.length}',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: 'python',
-            arguments: jsonEncode({'code': rawCode}),
-          ),
+          name: 'python',
+          arguments: <String, dynamic>{'code': rawCode},
         ),
       );
       cursor = output.length;
@@ -241,58 +232,16 @@ class FunctionaryV32Handler extends ChatTemplateHandler {
     );
   }
 
-  ({int start, int end})? _extractJsonObject(String text, int start) {
-    if (start >= text.length || text.codeUnitAt(start) != 0x7B) {
+  ParsedJsonValueSlice? _extractJsonObjectRange(String text, int start) {
+    final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(text, start);
+    if (jsonSlice == null || jsonSlice.value is! Map) {
       return null;
     }
-
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = start; i < text.length; i++) {
-      final codeUnit = text.codeUnitAt(i);
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (codeUnit == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (codeUnit == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (codeUnit == 0x22) {
-        inString = true;
-        continue;
-      }
-
-      if (codeUnit == 0x7B) {
-        depth++;
-      } else if (codeUnit == 0x7D) {
-        depth--;
-        if (depth == 0) {
-          return (start: start, end: i + 1);
-        }
-      }
-    }
-
-    return null;
+    return jsonSlice;
   }
 
   String _normalizeArguments(String jsonText) {
-    try {
-      final decoded = jsonDecode(jsonText);
-      return jsonEncode(decoded);
-    } catch (_) {
-      return jsonText;
-    }
+    return ToolCallParsingUtils.normalizeJsonArguments(jsonText);
   }
 
   bool _isWhitespace(int codeUnit) =>

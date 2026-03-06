@@ -1,17 +1,15 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
 import '../../models/chat/chat_message.dart';
 import '../../models/chat/chat_template_result.dart';
-import '../../models/chat/completion_chunk.dart';
 import '../../models/tools/tool_definition.dart';
 import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Apertus format.
 class ApertusHandler extends ChatTemplateHandler {
@@ -130,7 +128,7 @@ class ApertusHandler extends ChatTemplateHandler {
 
     final prelude = text.substring(0, start);
     final payload = text.substring(start + prefix.length);
-    final jsonSlice = _extractLeadingJsonValue(payload, 0);
+    final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(payload, 0);
     if (jsonSlice == null || jsonSlice.value is! List) {
       return ChatParseResult(
         content: text.trim(),
@@ -149,35 +147,14 @@ class ApertusHandler extends ChatTemplateHandler {
       );
     }
 
-    final toolCalls = <LlamaCompletionChunkToolCall>[];
-    for (final value in jsonSlice.value as List<dynamic>) {
-      if (value is! Map) {
-        continue;
-      }
-      final map = Map<String, dynamic>.from(value);
-      if (map.length != 1) {
-        continue;
-      }
-
-      final entry = map.entries.first;
-      final name = entry.key;
-      if (name.isEmpty) {
-        continue;
-      }
-      final args = entry.value;
-      final arguments = args is String
-          ? args
-          : (args == null ? '' : jsonEncode(args));
-      toolCalls.add(
-        LlamaCompletionChunkToolCall(
-          index: toolCalls.length,
-          id: null,
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: arguments,
-          ),
-        ),
+    final toolCalls = ToolCallParsingUtils.parseSingleKeyToolCallArray(
+      jsonSlice.value,
+      assignFallbackIds: false,
+    );
+    if (toolCalls == null) {
+      return ChatParseResult(
+        content: text.trim(),
+        reasoningContent: thinking.reasoning,
       );
     }
 
@@ -187,100 +164,6 @@ class ApertusHandler extends ChatTemplateHandler {
       reasoningContent: thinking.reasoning,
       toolCalls: toolCalls,
     );
-  }
-
-  _JsonValueSlice? _extractLeadingJsonValue(String input, int offset) {
-    if (offset >= input.length) {
-      return null;
-    }
-
-    int? end;
-    final first = input.codeUnitAt(offset);
-    if (first == 0x7B || first == 0x5B) {
-      end = _findStructuredJsonEnd(input, offset);
-    } else if (first == 0x22) {
-      end = _findJsonStringEnd(input, offset);
-    } else {
-      final scalar = RegExp(
-        r'(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)',
-      ).matchAsPrefix(input, offset);
-      if (scalar != null) {
-        end = scalar.end;
-      }
-    }
-
-    if (end == null || end <= offset) {
-      return null;
-    }
-
-    try {
-      return _JsonValueSlice(
-        value: jsonDecode(input.substring(offset, end)),
-        end: end,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int? _findStructuredJsonEnd(String input, int start) {
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = start; i < input.length; i++) {
-      final ch = input.codeUnitAt(i);
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (ch == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (ch == 0x22) {
-        inString = true;
-        continue;
-      }
-      if (ch == 0x7B || ch == 0x5B) {
-        depth++;
-        continue;
-      }
-      if (ch == 0x7D || ch == 0x5D) {
-        depth--;
-        if (depth == 0) {
-          return i + 1;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  int? _findJsonStringEnd(String input, int start) {
-    var escaped = false;
-    for (var i = start + 1; i < input.length; i++) {
-      final ch = input.codeUnitAt(i);
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == 0x5C) {
-        escaped = true;
-        continue;
-      }
-      if (ch == 0x22) {
-        return i + 1;
-      }
-    }
-    return null;
   }
 
   @override
@@ -314,11 +197,4 @@ class ApertusHandler extends ChatTemplateHandler {
       suffix: '<|tools_suffix|>',
     );
   }
-}
-
-final class _JsonValueSlice {
-  final Object? value;
-  final int end;
-
-  const _JsonValueSlice({required this.value, required this.end});
 }

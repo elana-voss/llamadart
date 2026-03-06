@@ -104,5 +104,36 @@ void main() {
         containsPair('city', 'Seoul'),
       );
     });
+
+    test('decodeToolArgumentsObject extracts first object from mixed text', () {
+      final decoded = decodeToolArgumentsObject(
+        'before {"city":"Seoul","unit":"celsius"} after',
+      );
+
+      expect(decoded, containsPair('city', 'Seoul'));
+      expect(decoded, containsPair('unit', 'celsius'));
+    });
+
+    test('normalizeFallbackToolArguments unwraps argument containers', () {
+      final normalized = normalizeFallbackToolArguments(<String, dynamic>{
+        'arguments': <String, dynamic>{'city': 'Seoul'},
+      });
+
+      expect(normalized, equals(<String, dynamic>{'city': 'Seoul'}));
+    });
+
+    test('parses top-level tool_call object with explicit id', () {
+      final parsed = parseToolCallsFromLooseText(
+        '{"id":"call_7","tool_call":{"name":"get_weather","arguments":{"city":"Seoul"}}}',
+      );
+
+      expect(parsed.toolCalls, hasLength(1));
+      expect(parsed.toolCalls.single.id, 'call_7');
+      expect(parsed.toolCalls.single.function?.name, 'get_weather');
+      expect(
+        jsonDecode(parsed.toolCalls.single.function!.arguments!),
+        containsPair('city', 'Seoul'),
+      );
+    });
   });
 }

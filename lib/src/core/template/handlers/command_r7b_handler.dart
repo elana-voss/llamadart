@@ -1,15 +1,13 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
 import '../../models/chat/chat_template_result.dart';
-import '../../models/chat/completion_chunk.dart';
 import '../../models/tools/tool_definition.dart';
 import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Command R7B format.
 ///
@@ -117,7 +115,10 @@ class CommandR7BHandler extends ChatTemplateHandler {
     if (actionStart != -1) {
       final prelude = text.substring(0, actionStart);
       final afterStart = text.substring(actionStart + startAction.length);
-      final jsonSlice = _extractLeadingJsonValue(afterStart, 0);
+      final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(
+        afterStart,
+        0,
+      );
       if (jsonSlice == null || jsonSlice.value is! List) {
         return ChatParseResult(
           content: text.trim(),
@@ -125,40 +126,17 @@ class CommandR7BHandler extends ChatTemplateHandler {
         );
       }
 
-      final toolCalls = <LlamaCompletionChunkToolCall>[];
-      for (final item in jsonSlice.value as List<dynamic>) {
-        if (item is! Map) {
-          return ChatParseResult(
-            content: text.trim(),
-            reasoningContent: thinking.reasoning,
-          );
-        }
-        final call = Map<String, dynamic>.from(item);
-        final name = call['tool_name'] as String?;
-        if (name == null || name.isEmpty) {
-          return ChatParseResult(
-            content: text.trim(),
-            reasoningContent: thinking.reasoning,
-          );
-        }
-
-        final argumentsValue = call.containsKey('parameters')
-            ? call['parameters']
-            : '';
-        final arguments = argumentsValue is String
-            ? argumentsValue
-            : jsonEncode(argumentsValue);
-        final toolId = call['tool_call_id']?.toString() ?? '';
-        toolCalls.add(
-          LlamaCompletionChunkToolCall(
-            index: toolCalls.length,
-            id: toolId.isEmpty ? null : toolId,
-            type: 'function',
-            function: LlamaCompletionChunkFunction(
-              name: name,
-              arguments: arguments,
-            ),
-          ),
+      final toolCalls = ToolCallParsingUtils.parseToolCallArray(
+        jsonSlice.value,
+        nameKeys: const <String>['tool_name'],
+        argumentKeys: const <String>['parameters'],
+        idKeys: const <String>['tool_call_id'],
+        assignFallbackIds: false,
+      );
+      if (toolCalls == null) {
+        return ChatParseResult(
+          content: text.trim(),
+          reasoningContent: thinking.reasoning,
         );
       }
 
@@ -221,100 +199,6 @@ class CommandR7BHandler extends ChatTemplateHandler {
       content: text.trim(),
       reasoningContent: thinking.reasoning,
     );
-  }
-
-  _JsonValueSlice? _extractLeadingJsonValue(String input, int offset) {
-    if (offset >= input.length) {
-      return null;
-    }
-
-    int? end;
-    final first = input.codeUnitAt(offset);
-    if (first == 0x7B || first == 0x5B) {
-      end = _findStructuredJsonEnd(input, offset);
-    } else if (first == 0x22) {
-      end = _findJsonStringEnd(input, offset);
-    } else {
-      final scalar = RegExp(
-        r'(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)',
-      ).matchAsPrefix(input, offset);
-      if (scalar != null) {
-        end = scalar.end;
-      }
-    }
-
-    if (end == null || end <= offset) {
-      return null;
-    }
-
-    try {
-      return _JsonValueSlice(
-        value: jsonDecode(input.substring(offset, end)),
-        end: end,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int? _findStructuredJsonEnd(String input, int start) {
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = start; i < input.length; i++) {
-      final ch = input.codeUnitAt(i);
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (ch == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (ch == 0x22) {
-        inString = true;
-        continue;
-      }
-      if (ch == 0x7B || ch == 0x5B) {
-        depth++;
-        continue;
-      }
-      if (ch == 0x7D || ch == 0x5D) {
-        depth--;
-        if (depth == 0) {
-          return i + 1;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  int? _findJsonStringEnd(String input, int start) {
-    var escaped = false;
-    for (var i = start + 1; i < input.length; i++) {
-      final ch = input.codeUnitAt(i);
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == 0x5C) {
-        escaped = true;
-        continue;
-      }
-      if (ch == 0x22) {
-        return i + 1;
-      }
-    }
-    return null;
   }
 
   @override
@@ -394,11 +278,4 @@ value ::= string | number | boolean | null | arr | obj
 arr ::= "[" space (value ("," space value)*)? space "]"
 obj ::= "{" space (string ":" space value ("," space string ":" space value)*)? space "}"''';
   }
-}
-
-final class _JsonValueSlice {
-  final Object? value;
-  final int end;
-
-  const _JsonValueSlice({required this.value, required this.end});
 }

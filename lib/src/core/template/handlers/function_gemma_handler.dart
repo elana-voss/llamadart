@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
@@ -12,6 +10,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../tool_call_fallback_parser.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for FunctionGemma format.
 ///
@@ -165,25 +164,15 @@ class FunctionGemmaHandler extends ChatTemplateHandler {
       return {'value': null};
     }
 
-    if (result is Map<String, dynamic>) {
-      return result;
-    }
-
-    if (result is Map) {
-      return result.map((key, value) => MapEntry('$key', value));
+    final map = ToolCallParsingUtils.coerceMap(result);
+    if (map != null) {
+      return map;
     }
 
     if (result is String) {
-      try {
-        final decoded = jsonDecode(result);
-        if (decoded is Map<String, dynamic>) {
-          return decoded;
-        }
-        if (decoded is Map) {
-          return decoded.map((key, value) => MapEntry('$key', value));
-        }
-      } catch (_) {
-        // Keep scalar string value below.
+      final decoded = ToolCallParsingUtils.decodeJsonObject(result);
+      if (decoded != null) {
+        return decoded;
       }
       return {'value': result};
     }
@@ -240,14 +229,10 @@ class FunctionGemmaHandler extends ChatTemplateHandler {
       );
 
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: i,
-          id: 'call_$i',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: normalizedName,
-            arguments: jsonEncode(normalizedArguments),
-          ),
+          name: normalizedName,
+          arguments: normalizedArguments,
         ),
       );
       contentText = contentText.replaceAll(match.group(0)!, '');

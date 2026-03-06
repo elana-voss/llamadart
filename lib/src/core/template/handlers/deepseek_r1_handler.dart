@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
@@ -11,6 +9,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 import '../tool_call_grammar_utils.dart';
 
 /// Handler for DeepSeek R1 format.
@@ -153,14 +152,10 @@ class DeepseekR1Handler extends ChatTemplateHandler {
           continue;
         }
         toolCalls.add(
-          LlamaCompletionChunkToolCall(
+          ToolCallParsingUtils.createFunctionToolCall(
             index: i,
-            id: 'call_$i',
-            type: 'function',
-            function: LlamaCompletionChunkFunction(
-              name: toolName,
-              arguments: jsonEncode(arguments),
-            ),
+            name: toolName,
+            arguments: arguments,
           ),
         );
       }
@@ -231,10 +226,6 @@ class DeepseekR1Handler extends ChatTemplateHandler {
   }
 
   Object? _decodeJson(String input) {
-    try {
-      return jsonDecode(input);
-    } catch (_) {
-      return null;
-    }
+    return ToolCallParsingUtils.decodeJsonValue(input);
   }
 }

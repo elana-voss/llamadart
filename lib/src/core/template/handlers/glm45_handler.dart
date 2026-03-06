@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
@@ -10,6 +8,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for GLM 4.5 format.
 ///
@@ -265,11 +264,7 @@ class Glm45Handler extends ChatTemplateHandler {
       return '';
     }
 
-    try {
-      return jsonDecode(value);
-    } catch (_) {
-      return value;
-    }
+    return ToolCallParsingUtils.decodeJsonValueOrString(value);
   }
 
   _ExtractedToolCalls _extractToolCalls(String input) {
@@ -299,14 +294,10 @@ class Glm45Handler extends ChatTemplateHandler {
 
       final index = toolCalls.length;
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: index,
-          id: 'call_$index',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: toolName,
-            arguments: jsonEncode(args),
-          ),
+          name: toolName,
+          arguments: args,
         ),
       );
 

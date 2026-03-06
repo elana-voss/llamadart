@@ -5,6 +5,7 @@ import '../models/chat/chat_role.dart';
 import '../models/chat/content_part.dart';
 import 'chat_format.dart';
 import 'template_caps.dart';
+import 'tool_call_parsing_utils.dart';
 
 /// Template workarounds matching llama.cpp's `workaround` namespace.
 ///
@@ -75,20 +76,27 @@ class TemplateWorkarounds {
       final toolCalls = message['tool_calls'];
       if (toolCalls is! List) continue;
 
-      for (final item in toolCalls) {
-        if (item is! Map<String, dynamic>) continue;
+      for (var i = 0; i < toolCalls.length; i++) {
+        final item = toolCalls[i];
+        final toolCall = item is Map<String, dynamic>
+            ? item
+            : ToolCallParsingUtils.coerceMap(item);
+        if (toolCall == null) continue;
+        if (!identical(toolCall, item)) {
+          toolCalls[i] = toolCall;
+        }
 
-        if (item['function'] is Map) {
-          final function = Map<String, dynamic>.from(item['function'] as Map);
+        final function = ToolCallParsingUtils.coerceMap(toolCall['function']);
+        if (function != null) {
           if (function.containsKey('arguments')) {
             function['arguments'] = _argumentsToObject(function['arguments']);
           }
-          item['function'] = function;
+          toolCall['function'] = function;
           continue;
         }
 
-        if (item.containsKey('arguments')) {
-          item['arguments'] = _argumentsToObject(item['arguments']);
+        if (toolCall.containsKey('arguments')) {
+          toolCall['arguments'] = _argumentsToObject(toolCall['arguments']);
         }
       }
     }
@@ -165,22 +173,12 @@ class TemplateWorkarounds {
   }
 
   static Map<String, dynamic> _argumentsToObject(Object? args) {
-    if (args is Map<String, dynamic>) {
-      return args;
-    }
-
-    if (args is Map) {
-      return Map<String, dynamic>.from(args);
+    final map = ToolCallParsingUtils.decodeJsonMapValue(args);
+    if (map != null) {
+      return map;
     }
 
     if (args is String) {
-      final decoded = jsonDecode(args);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
       throw const FormatException('Tool call arguments must be a JSON object.');
     }
 
@@ -211,25 +209,23 @@ class TemplateWorkarounds {
     final toolCalls = message['tool_calls'];
     if (toolCalls is List) {
       for (final item in toolCalls) {
-        if (item is! Map<String, dynamic>) continue;
+        final toolCall = ToolCallParsingUtils.coerceMap(item);
+        if (toolCall == null) continue;
 
-        final function = item['function'];
+        final function = ToolCallParsingUtils.coerceMap(toolCall['function']);
         final name =
-            item['name'] as String? ??
-            (function is Map<String, dynamic>
-                ? function['name'] as String?
-                : null);
-        final arguments =
-            item['arguments'] ??
-            (function is Map<String, dynamic> ? function['arguments'] : null);
+            toolCall['name'] as String? ?? (function?['name'] as String?);
+        final arguments = toolCall['arguments'] ?? function?['arguments'];
         if (name == null) continue;
 
         final argObject = _argumentsToObject(arguments);
-        final rawJson = arguments is String ? arguments : jsonEncode(argObject);
+        final rawJson = arguments is String
+            ? arguments
+            : ToolCallParsingUtils.encodeArguments(argObject);
 
         parts.add(
           LlamaToolCallContent(
-            id: item['id'] as String?,
+            id: toolCall['id'] as String?,
             name: name,
             arguments: argObject,
             rawJson: rawJson,

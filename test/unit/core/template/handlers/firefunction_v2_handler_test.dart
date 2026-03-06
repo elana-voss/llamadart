@@ -34,6 +34,15 @@ void main() {
         jsonDecode(parsed.toolCalls.first.function!.arguments!),
         equals({'city': 'Seoul'}),
       );
+
+      const malformed = ' functools[{"arguments":{"city":"Seoul"}}]';
+      final malformedParsed = ChatTemplateEngine.parse(
+        ChatFormat.firefunctionV2.index,
+        malformed,
+      );
+
+      expect(malformedParsed.toolCalls, isEmpty);
+      expect(malformedParsed.content, equals(malformed.trim()));
     });
 
     test('renders with firefunction format when tools are present', () {

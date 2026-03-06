@@ -71,6 +71,17 @@ void main() {
       containsPair('city', 'Seoul'),
     );
   });
+
+  test('keeps malformed action block as content', () {
+    final handler = CommandR7BHandler();
+    const input =
+        '<|START_ACTION|>[{"parameters":{"city":"Seoul"}}]<|END_ACTION|>';
+
+    final parsed = handler.parse(input);
+
+    expect(parsed.toolCalls, isEmpty);
+    expect(parsed.content, equals(input));
+  });
 }
 
 Future<Object?> _noop(_) async {

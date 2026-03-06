@@ -4,13 +4,13 @@ import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
 import '../../models/chat/chat_template_result.dart';
-import '../../models/chat/completion_chunk.dart';
 import '../../models/inference/tool_choice.dart';
 import '../../models/tools/tool_definition.dart';
 import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../template_internal_metadata.dart';
+import '../tool_call_parsing_utils.dart';
 import '../tool_call_grammar_utils.dart';
 
 /// Handler for FireFunction v2 templates.
@@ -114,42 +114,13 @@ class FirefunctionV2Handler extends ChatTemplateHandler {
       return ChatParseResult(content: output.trim());
     }
 
-    Object? decoded;
-    try {
-      decoded = jsonDecode(extracted.json);
-    } catch (_) {
+    final decoded = ToolCallParsingUtils.decodeJsonValue(extracted.json);
+    final toolCalls = ToolCallParsingUtils.parseToolCallArray(
+      decoded,
+      assignFallbackIds: false,
+    );
+    if (toolCalls == null) {
       return ChatParseResult(content: output.trim());
-    }
-    if (decoded is! List) {
-      return ChatParseResult(content: output.trim());
-    }
-
-    final toolCalls = <LlamaCompletionChunkToolCall>[];
-    for (final item in decoded) {
-      if (item is! Map) {
-        return ChatParseResult(content: output.trim());
-      }
-      final call = Map<String, dynamic>.from(item);
-      final name = call['name'] as String?;
-      if (name == null || name.isEmpty) {
-        return ChatParseResult(content: output.trim());
-      }
-      final rawArguments = call['arguments'];
-      final arguments = rawArguments is String
-          ? rawArguments
-          : (call.containsKey('arguments') ? jsonEncode(rawArguments) : '');
-      final id = call['id']?.toString();
-      toolCalls.add(
-        LlamaCompletionChunkToolCall(
-          index: toolCalls.length,
-          id: (id == null || id.isEmpty) ? null : id,
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: arguments,
-          ),
-        ),
-      );
     }
 
     return ChatParseResult(content: contentBefore.trim(), toolCalls: toolCalls);

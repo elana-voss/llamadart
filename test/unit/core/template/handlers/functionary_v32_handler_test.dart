@@ -50,5 +50,28 @@ void main() {
       expect(parsed.toolCalls, isEmpty);
       expect(parsed.content, equals('>>>weather\n{"city":"Seoul"'));
     });
+
+    test('rolls back earlier tool calls when a later one is malformed', () {
+      final handler = FunctionaryV32Handler();
+      const output = '>>>weather\n{"city":"Seoul"}>>>time\n{"zone":"KST"';
+
+      final parsed = handler.parse(output);
+
+      expect(parsed.toolCalls, isEmpty);
+      expect(parsed.content, equals(output));
+    });
+
+    test(
+      'keeps leading all-channel content when later tool call is malformed',
+      () {
+        final handler = FunctionaryV32Handler();
+        const output = '>>>all\nhello\n>>>weather\n{"city":"Seoul"';
+
+        final parsed = handler.parse(output);
+
+        expect(parsed.toolCalls, isEmpty);
+        expect(parsed.content, equals(output));
+      },
+    );
   });
 }

@@ -45,6 +45,15 @@ void main() {
       jsonDecode(parsed.toolCalls.first.function!.arguments!),
       containsPair('key', 'abc'),
     );
+
+    final malformed = handler.parse(
+      '<TOOLCALL>[{"arguments":{"key":"abc"}}]</TOOLCALL>',
+    );
+    expect(malformed.toolCalls, isEmpty);
+    expect(
+      malformed.content,
+      equals('<TOOLCALL>[{"arguments":{"key":"abc"}}]</TOOLCALL>'),
+    );
   });
 }
 

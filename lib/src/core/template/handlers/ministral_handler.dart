@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
@@ -15,6 +13,7 @@ import '../peg_parser_builder.dart';
 import '../template_internal_metadata.dart';
 import '../thinking_utils.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Ministral format.
 ///
@@ -183,10 +182,9 @@ class MinistralHandler extends ChatTemplateHandler {
             }
           } else if (content is List) {
             for (final item in content) {
-              if (item is Map<String, dynamic>) {
-                blocks.add(item);
-              } else if (item is Map) {
-                blocks.add(Map<String, dynamic>.from(item));
+              final block = ToolCallParsingUtils.coerceMap(item);
+              if (block != null) {
+                blocks.add(block);
               }
             }
           }
@@ -313,14 +311,10 @@ class MinistralHandler extends ChatTemplateHandler {
 
       final index = toolCalls.length;
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: index,
-          id: 'call_$index',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: jsonObj,
-          ),
+          name: name,
+          arguments: jsonObj,
         ),
       );
     }
@@ -341,83 +335,25 @@ class MinistralHandler extends ChatTemplateHandler {
       return null;
     }
 
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = start; i < input.length; i++) {
-      final code = input.codeUnitAt(i);
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (code == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (code == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (code == 0x22) {
-        inString = true;
-        continue;
-      }
-      if (code == 0x7B) {
-        depth++;
-        continue;
-      }
-      if (code == 0x7D) {
-        depth--;
-        if (depth == 0) {
-          final candidate = input.substring(start, i + 1);
-          try {
-            jsonDecode(candidate);
-            return candidate;
-          } catch (_) {
-            return null;
-          }
-        }
-      }
+    final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(
+      input,
+      start,
+    );
+    if (jsonSlice == null || jsonSlice.value is! Map) {
+      return null;
     }
 
-    return null;
+    return input.substring(start, jsonSlice.end);
   }
 
   List<LlamaCompletionChunkToolCall> _parseToolCallArray(String jsonText) {
-    final toolCalls = <LlamaCompletionChunkToolCall>[];
-    final list = jsonDecode(jsonText) as List<dynamic>;
-    for (var i = 0; i < list.length; i++) {
-      final item = list[i];
-      if (item is! Map) {
-        continue;
-      }
-
-      final call = Map<String, dynamic>.from(item);
-      final name = call['name'] as String?;
-      final args = call['arguments'];
-      final id = call['id'] as String?;
-      if (name == null || name.isEmpty) {
-        continue;
-      }
-
-      toolCalls.add(
-        LlamaCompletionChunkToolCall(
-          index: i,
-          id: id ?? 'call_$i',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: args is String ? args : jsonEncode(args ?? {}),
-          ),
-        ),
-      );
-    }
-    return toolCalls;
+    final decoded = ToolCallParsingUtils.decodeJsonValue(jsonText);
+    return ToolCallParsingUtils.parseToolCallArray(
+          decoded,
+          assignFallbackIds: true,
+          failOnInvalidItem: false,
+        ) ??
+        const <LlamaCompletionChunkToolCall>[];
   }
 
   LlamaCompletionChunkToolCall? _parseNameJsonSingleCall(String text) {
@@ -446,11 +382,10 @@ class MinistralHandler extends ChatTemplateHandler {
       return null;
     }
 
-    return LlamaCompletionChunkToolCall(
+    return ToolCallParsingUtils.createFunctionToolCall(
       index: 0,
-      id: 'call_0',
-      type: 'function',
-      function: LlamaCompletionChunkFunction(name: name, arguments: jsonObj),
+      name: name,
+      arguments: jsonObj,
     );
   }
 

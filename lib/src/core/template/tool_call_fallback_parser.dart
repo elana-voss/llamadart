@@ -1,6 +1,5 @@
-import 'dart:convert';
-
 import '../models/chat/completion_chunk.dart';
+import 'tool_call_parsing_utils.dart';
 
 /// Result of parsing loose tool-call text fallback.
 class ToolCallFallbackParseResult {
@@ -62,16 +61,15 @@ Map<String, dynamic> decodeToolArgumentsObject(String? rawArguments) {
     return const <String, dynamic>{};
   }
 
-  try {
-    final decoded = jsonDecode(trimmed);
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    }
-  } catch (_) {
-    // Fall through.
+  final decoded = ToolCallParsingUtils.decodeJsonMapValue(
+    trimmed,
+    trimInput: true,
+  );
+  if (decoded != null) {
+    return decoded;
   }
 
-  final object = _extractFirstJsonObject(trimmed);
+  final object = ToolCallParsingUtils.extractFirstJsonObject(trimmed);
   if (object != null) {
     return object;
   }
@@ -83,7 +81,7 @@ Map<String, dynamic> decodeToolArgumentsObject(String? rawArguments) {
 Map<String, dynamic> normalizeFallbackToolArguments(
   Map<String, dynamic> arguments,
 ) {
-  final normalized = Map<String, dynamic>.from(arguments);
+  final normalized = <String, dynamic>{...arguments};
   final wrappedArguments = _unwrapArgumentContainer(normalized);
   if (wrappedArguments != null) {
     normalized
@@ -100,11 +98,11 @@ Map<String, dynamic>? _unwrapArgumentContainer(Map<String, dynamic> arguments) {
   }
 
   final entry = arguments.entries.first;
-  if (!wrapperKeys.contains(entry.key) || entry.value is! Map) {
+  if (!wrapperKeys.contains(entry.key)) {
     return null;
   }
 
-  return Map<String, dynamic>.from(entry.value as Map);
+  return ToolCallParsingUtils.coerceMap(entry.value);
 }
 
 /// Normalizes noisy tool aliases to canonical names where possible.
@@ -151,40 +149,27 @@ List<LlamaCompletionChunkToolCall> _parseJsonLikeToolCalls(String input) {
 }
 
 Object? _decodeJsonLoose(String input) {
-  try {
-    return jsonDecode(input);
-  } catch (_) {
-    var normalized = input;
-    normalized = normalized.replaceAllMapped(
-      RegExp(r'("name"\s*:\s*)([A-Za-z_][A-Za-z0-9_\.-]*)'),
-      (match) => '${match.group(1)}"${match.group(2)}"',
-    );
-    normalized = normalized.replaceAllMapped(
-      RegExp(r'("function"\s*:\s*)([A-Za-z_][A-Za-z0-9_\.-]*)'),
-      (match) => '${match.group(1)}"${match.group(2)}"',
-    );
-
-    try {
-      return jsonDecode(normalized);
-    } catch (_) {
-      final firstObject = _extractFirstJsonObject(normalized);
-      if (firstObject != null) {
-        return firstObject;
-      }
-      return null;
-    }
+  final direct = ToolCallParsingUtils.decodeJsonValue(input);
+  if (direct != null) {
+    return direct;
   }
+
+  final normalized = _normalizeLooseJsonIdentifiers(input);
+  final normalizedDecoded = ToolCallParsingUtils.decodeJsonValue(normalized);
+  if (normalizedDecoded != null) {
+    return normalizedDecoded;
+  }
+
+  return ToolCallParsingUtils.extractFirstJsonObject(normalized);
 }
 
 List<LlamaCompletionChunkToolCall> _toolCallsFromDecoded(
   Object decoded, {
   required int startIndex,
 }) {
-  if (decoded is Map) {
-    final call = _toolCallFromMap(
-      Map<String, dynamic>.from(decoded),
-      index: startIndex,
-    );
+  final decodedMap = ToolCallParsingUtils.coerceMap(decoded);
+  if (decodedMap != null) {
+    final call = _toolCallFromMap(decodedMap, index: startIndex);
     if (call == null) {
       return const <LlamaCompletionChunkToolCall>[];
     }
@@ -194,15 +179,12 @@ List<LlamaCompletionChunkToolCall> _toolCallsFromDecoded(
   if (decoded is List) {
     final calls = <LlamaCompletionChunkToolCall>[];
     for (var i = 0; i < decoded.length; i++) {
-      final item = decoded[i];
-      if (item is! Map) {
+      final item = ToolCallParsingUtils.coerceMap(decoded[i]);
+      if (item == null) {
         continue;
       }
 
-      final call = _toolCallFromMap(
-        Map<String, dynamic>.from(item),
-        index: startIndex + i,
-      );
+      final call = _toolCallFromMap(item, index: startIndex + i);
       if (call != null) {
         calls.add(call);
       }
@@ -217,16 +199,14 @@ LlamaCompletionChunkToolCall? _toolCallFromMap(
   Map<String, dynamic> object, {
   required int index,
 }) {
-  final toolCallRaw = object['tool_call'];
-  final candidate = toolCallRaw is Map
-      ? Map<String, dynamic>.from(toolCallRaw)
-      : Map<String, dynamic>.from(object);
+  final candidate =
+      ToolCallParsingUtils.coerceMap(object['tool_call']) ?? object;
 
   final functionRaw = candidate['function'];
   Object? nameRaw;
   Object? argumentsRaw;
-  if (functionRaw is Map) {
-    final function = Map<String, dynamic>.from(functionRaw);
+  final function = ToolCallParsingUtils.coerceMap(functionRaw);
+  if (function != null) {
     nameRaw = function['name'];
     argumentsRaw =
         function['arguments'] ??
@@ -270,14 +250,11 @@ LlamaCompletionChunkToolCall? _toolCallFromMap(
     return null;
   }
 
-  return LlamaCompletionChunkToolCall(
+  return ToolCallParsingUtils.createFunctionToolCall(
     index: index,
-    id: object['id'] is String ? object['id'] as String : 'call_$index',
-    type: 'function',
-    function: LlamaCompletionChunkFunction(
-      name: normalizedName,
-      arguments: jsonEncode(normalizedArgs),
-    ),
+    name: normalizedName,
+    id: object['id'] is String ? object['id'] as String : null,
+    arguments: normalizedArgs,
   );
 }
 
@@ -313,25 +290,13 @@ Map<String, dynamic> _toArgumentsObject(Object? raw) {
     return const <String, dynamic>{};
   }
 
-  if (raw is Map) {
-    return Map<String, dynamic>.from(raw);
+  final map = ToolCallParsingUtils.coerceMap(raw);
+  if (map != null) {
+    return map;
   }
 
   if (raw is String) {
-    final trimmed = raw.trim();
-    if (trimmed.isEmpty) {
-      return const <String, dynamic>{};
-    }
-
-    final decoded = _decodeJsonLoose(trimmed);
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    }
-
-    final object = _extractFirstJsonObject(trimmed);
-    if (object != null) {
-      return object;
-    }
+    return decodeToolArgumentsObject(raw);
   }
 
   return const <String, dynamic>{};
@@ -368,14 +333,10 @@ LlamaCompletionChunkToolCall? _parseFunctionCallSyntax(String input) {
     return null;
   }
 
-  return LlamaCompletionChunkToolCall(
+  return ToolCallParsingUtils.createFunctionToolCall(
     index: 0,
-    id: 'call_0',
-    type: 'function',
-    function: LlamaCompletionChunkFunction(
-      name: normalizedName,
-      arguments: jsonEncode(normalizedArgs),
-    ),
+    name: normalizedName,
+    arguments: normalizedArgs,
   );
 }
 
@@ -384,7 +345,7 @@ Map<String, dynamic>? _parseFunctionArguments(String raw) {
     return const <String, dynamic>{};
   }
 
-  final asObject = _extractFirstJsonObject(raw);
+  final asObject = ToolCallParsingUtils.extractFirstJsonObject(raw);
   if (asObject != null) {
     return asObject;
   }
@@ -458,78 +419,15 @@ String _stripToolFence(String input) {
   return inner.trim();
 }
 
-Map<String, dynamic>? _extractFirstJsonObject(String input) {
-  final start = input.indexOf('{');
-  if (start < 0) {
-    return null;
-  }
-
-  var depth = 0;
-  var inString = false;
-  var escaped = false;
-
-  for (var i = start; i < input.length; i++) {
-    final char = input[i];
-
-    if (inString) {
-      if (escaped) {
-        escaped = false;
-      } else if (char == r'\') {
-        escaped = true;
-      } else if (char == '"') {
-        inString = false;
-      }
-      continue;
-    }
-
-    if (char == '"') {
-      inString = true;
-      continue;
-    }
-
-    if (char == '{') {
-      depth++;
-      continue;
-    }
-
-    if (char == '}') {
-      depth--;
-      if (depth == 0) {
-        final candidate = input.substring(start, i + 1);
-        return _decodeJsonObject(candidate);
-      }
-    }
-  }
-
-  return null;
-}
-
-Map<String, dynamic>? _decodeJsonObject(String input) {
-  try {
-    final decoded = jsonDecode(input);
-    if (decoded is Map) {
-      return Map<String, dynamic>.from(decoded);
-    }
-  } catch (_) {
-    var normalized = input;
-    normalized = normalized.replaceAllMapped(
-      RegExp(r'("name"\s*:\s*)([A-Za-z_][A-Za-z0-9_\.-]*)'),
-      (match) => '${match.group(1)}"${match.group(2)}"',
-    );
-    normalized = normalized.replaceAllMapped(
-      RegExp(r'("function"\s*:\s*)([A-Za-z_][A-Za-z0-9_\.-]*)'),
-      (match) => '${match.group(1)}"${match.group(2)}"',
-    );
-
-    try {
-      final decoded = jsonDecode(normalized);
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
-    } catch (_) {
-      return null;
-    }
-  }
-
-  return null;
+String _normalizeLooseJsonIdentifiers(String input) {
+  var normalized = input;
+  normalized = normalized.replaceAllMapped(
+    RegExp(r'("name"\s*:\s*)([A-Za-z_][A-Za-z0-9_\.-]*)'),
+    (match) => '${match.group(1)}"${match.group(2)}"',
+  );
+  normalized = normalized.replaceAllMapped(
+    RegExp(r'("function"\s*:\s*)([A-Za-z_][A-Za-z0-9_\.-]*)'),
+    (match) => '${match.group(1)}"${match.group(2)}"',
+  );
+  return normalized;
 }
