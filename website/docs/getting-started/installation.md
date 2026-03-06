@@ -11,7 +11,7 @@ title: Installation
 
 ```yaml
 dependencies:
-  llamadart: ^0.6.4
+  llamadart: ^0.6.5
 ```
 
 Then resolve packages:

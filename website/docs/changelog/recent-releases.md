@@ -8,6 +8,10 @@ For canonical full release notes, use:
 
 ## Unreleased
 
+- No entries yet.
+
+## 0.6.5
+
 - Added embedding APIs: `LlamaEngine.embed(...)` and
   `LlamaEngine.embedBatch(...)`.
 - Added backend embedding capability interfaces for custom backend

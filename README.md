@@ -37,7 +37,7 @@
 
 ```yaml
 dependencies:
-  llamadart: ^0.6.4
+  llamadart: ^0.6.5
 ```
 
 ### 2. Run with defaults

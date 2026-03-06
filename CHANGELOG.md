@@ -1,4 +1,4 @@
-## Unreleased
+## 0.6.5
 
 * **Embedding API (native backend capability)**:
   * Added `LlamaEngine.embed(...)` and `LlamaEngine.embedBatch(...)` for direct vector generation.
