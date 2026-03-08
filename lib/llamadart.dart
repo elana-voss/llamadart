@@ -42,6 +42,8 @@ export 'src/backends/backend.dart'
         LlamaBackend,
         BackendAvailability,
         BackendRuntimeDiagnostics,
+        BackendPerfContextData,
+        BackendPerformanceDiagnostics,
         BackendEmbeddings,
         BackendBatchEmbeddings;
 

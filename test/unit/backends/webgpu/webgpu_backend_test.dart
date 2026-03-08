@@ -32,6 +32,7 @@ void main() {
     String? lastTokenEventEncoding;
     int? lastTokenEventFlushMs;
     int? lastTokenEventFlushChars;
+    String? lastPrompt;
     WebGpuBridgeConfig? lastBridgeConfig;
     late int runtimeGpuLayers;
     late bool runtimeGpuActive;
@@ -75,6 +76,7 @@ void main() {
       lastTokenEventEncoding = null;
       lastTokenEventFlushMs = null;
       lastTokenEventFlushChars = null;
+      lastPrompt = null;
       lastBridgeConfig = null;
       runtimeGpuLayers = 99;
       runtimeGpuActive = true;
@@ -116,6 +118,7 @@ void main() {
         'createCompletion'.toJS,
         ((String prompt, JSObject opts) {
           createCompletionCallCount += 1;
+          lastPrompt = prompt;
 
           final emitCurrentTextRaw = opts.getProperty(
             'emitCurrentTextOnToken'.toJS,
@@ -384,8 +387,18 @@ void main() {
         const ModelParams(contextSize: 4096),
       );
 
-      expect(lastRequestedBatchSize, 768);
-      expect(lastRequestedMicroBatchSize, 256);
+      expect(lastRequestedGpuLayers, 2);
+      expect(lastRequestedBatchSize, 32);
+      expect(lastRequestedMicroBatchSize, 8);
+    });
+
+    test('keeps requested gpu layers for non-qwen web loads', () async {
+      await backend.modelLoadFromUrl(
+        'https://example.com/llama-3.2-3b.gguf',
+        const ModelParams(contextSize: 4096, gpuLayers: 99),
+      );
+
+      expect(lastRequestedGpuLayers, 99);
     });
 
     test('does not apply qwen3.5-0.8b batch tuning in CPU mode', () async {
@@ -415,7 +428,7 @@ void main() {
       expect(chunks, isNotEmpty);
       expect(chunks.first, <int>[72, 101, 108, 108, 111]);
       expect(lastEmitCurrentTextOnToken, isFalse);
-      expect(lastTokenEventEncoding, 'text');
+      expect(lastTokenEventEncoding, 'bytes');
       expect(lastTokenEventFlushMs, 28);
       expect(lastTokenEventFlushChars, 48);
     });
@@ -824,10 +837,116 @@ void main() {
       expect(output, 'hi');
       expect(output.contains('<|im_end|>'), isFalse);
       expect(lastEmitCurrentTextOnToken, isTrue);
-      expect(lastTokenEventEncoding, 'text');
+      expect(lastTokenEventEncoding, 'bytes');
       expect(lastTokenEventFlushMs, 0);
       expect(lastTokenEventFlushChars, isNull);
     });
+
+    test('preserves split utf8 token bytes across callbacks', () async {
+      bridge.setProperty(
+        'createCompletion'.toJS,
+        ((String prompt, JSObject opts) {
+          lastPrompt = prompt;
+          final onToken = opts.getProperty('onToken'.toJS) as JSFunction?;
+          if (onToken != null) {
+            final firstPiece = JSUint8Array.withLength(2);
+            firstPiece.toDart.setAll(0, <int>[0xF0, 0x9F]);
+            onToken.callAsFunction(null, firstPiece, null);
+
+            final secondPiece = JSUint8Array.withLength(2);
+            secondPiece.toDart.setAll(0, <int>[0x98, 0x80]);
+            onToken.callAsFunction(null, secondPiece, null);
+          }
+          return Future<void>.value().toJS;
+        }).toJS,
+      );
+
+      await backend.modelLoadFromUrl(
+        'https://example.com/model.gguf',
+        const ModelParams(),
+      );
+
+      final chunks = await backend
+          .generate(1, 'Hello', const GenerationParams())
+          .toList();
+
+      expect(utf8.decode(chunks.expand((chunk) => chunk).toList()), '😀');
+    });
+
+    test('preserves chat template control token prefixes in prompts', () async {
+      await backend.modelLoadFromUrl(
+        'https://example.com/model.gguf',
+        const ModelParams(),
+      );
+
+      await backend
+          .generate(
+            1,
+            '<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n',
+            const GenerationParams(),
+          )
+          .drain<void>();
+
+      expect(
+        lastPrompt,
+        '<|im_start|>user\nhi<|im_end|>\n<|im_start|>assistant\n',
+      );
+    });
+
+    test('strips real bos token prefixes before bridge generation', () async {
+      await backend.modelLoadFromUrl(
+        'https://example.com/model.gguf',
+        const ModelParams(),
+      );
+
+      await backend
+          .generate(1, '<s>Hello', const GenerationParams())
+          .drain<void>();
+
+      expect(lastPrompt, 'Hello');
+    });
+
+    test(
+      'engine.create preserves leading chat template control tokens',
+      () async {
+        final engine = LlamaEngine(backend);
+        await engine.loadModelFromUrl(
+          'https://example.com/model.gguf',
+          modelParams: const ModelParams(),
+        );
+
+        await engine.create(<LlamaChatMessage>[
+          LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+        ]).drain<void>();
+
+        expect(lastPrompt, startsWith('<|im_start|>user\nhi<|im_end|>'));
+      },
+    );
+
+    test(
+      'engine.create preserves leading chat tokens for multimodal turns',
+      () async {
+        final engine = LlamaEngine(backend);
+        await engine.loadModelFromUrl(
+          'https://example.com/model.gguf',
+          modelParams: const ModelParams(),
+        );
+        await engine.loadMultimodalProjector('https://example.com/mmproj.gguf');
+
+        await engine.create(<LlamaChatMessage>[
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: <LlamaContentPart>[
+              LlamaImageContent(bytes: Uint8List.fromList(<int>[1, 2, 3])),
+              LlamaTextContent('describe this image'),
+            ],
+          ),
+        ]).drain<void>();
+
+        expect(lastPrompt, startsWith('<|im_start|>user\n'));
+        expect(sawMediaParts, isTrue);
+      },
+    );
 
     test(
       'buffers partial stop sequence prefixes across token callbacks',
@@ -835,6 +954,7 @@ void main() {
         bridge.setProperty(
           'createCompletion'.toJS,
           ((String prompt, JSObject opts) {
+            lastPrompt = prompt;
             final onToken = opts.getProperty('onToken'.toJS) as JSFunction?;
             if (onToken != null) {
               for (final text in <String>[

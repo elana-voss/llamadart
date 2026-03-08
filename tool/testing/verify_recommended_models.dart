@@ -69,21 +69,23 @@ const List<_ModelCase> _recommendedModels = <_ModelCase>[
     expectToolCall: true,
   ),
   _ModelCase(
-    id: 'qwen2.5-0.5b-instruct',
-    name: 'Qwen2.5 0.5B Instruct',
+    id: 'qwen3.5-0.8b-instruct',
+    name: 'Qwen3.5 0.8B Instruct',
     kind: _ModelKind.text,
-    modelFileName: 'qwen2.5-0.5b-instruct-q4_k_m.gguf',
+    modelFileName: 'Qwen3.5-0.8B-Q4_K_M.gguf',
     modelUrl:
-        'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true',
+        'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf?download=true',
+    contextSize: 4096,
     expectToolCall: true,
   ),
   _ModelCase(
-    id: 'qwen2.5-1.5b-instruct',
-    name: 'Qwen2.5 1.5B Instruct',
+    id: 'qwen3.5-2b-instruct',
+    name: 'Qwen3.5 2B Instruct',
     kind: _ModelKind.text,
-    modelFileName: 'qwen2.5-1.5b-instruct-q4_k_m.gguf',
+    modelFileName: 'Qwen3.5-2B-Q4_K_M.gguf',
     modelUrl:
-        'https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf?download=true',
+        'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf?download=true',
+    contextSize: 8192,
     expectToolCall: true,
   ),
   _ModelCase(
@@ -170,15 +172,24 @@ const List<_ModelCase> _recommendedModels = <_ModelCase>[
     expectToolCall: true,
   ),
   _ModelCase(
-    id: 'qwen3-4b',
-    name: 'Qwen3 4B',
+    id: 'qwen3.5-4b-instruct',
+    name: 'Qwen3.5 4B Instruct',
     kind: _ModelKind.text,
-    modelFileName: 'Qwen3-4B-Q4_K_M.gguf',
+    modelFileName: 'Qwen3.5-4B-Q4_K_M.gguf',
     modelUrl:
-        'https://huggingface.co/Qwen/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true',
+        'https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf?download=true',
     contextSize: 8192,
     expectToolCall: true,
-    expectThinking: true,
+  ),
+  _ModelCase(
+    id: 'qwen3.5-9b-instruct',
+    name: 'Qwen3.5 9B Instruct',
+    kind: _ModelKind.text,
+    modelFileName: 'Qwen3.5-9B-Q4_K_M.gguf',
+    modelUrl:
+        'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true',
+    contextSize: 8192,
+    expectToolCall: true,
   ),
   _ModelCase(
     id: 'meta-llama-3.1-8b-instruct',

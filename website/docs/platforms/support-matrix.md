@@ -5,7 +5,7 @@ title: Platform & Backend Matrix
 This page combines platform support and backend-module configuration for
 `llamadart`.
 
-The native-assets hook currently pins `llamadart-native` tag `b8157`
+The native-assets hook currently pins `llamadart-native` tag `b8216`
 (`hook/build.dart`). Module availability below is for that pinned tag.
 
 ## Platform/architecture coverage
@@ -25,7 +25,7 @@ The native-assets hook currently pins `llamadart-native` tag `b8157`
 | macOS x86_64 | `macos-x86_64` | No (fixed in hook) | Consolidated runtime: `cpu`, `metal` | Supported |
 | Web (browser) | N/A (JS bridge path) | N/A | Bridge router: `webgpu`, `cpu` fallback | Experimental |
 
-## Current module availability by bundle (`b8157`)
+## Current module availability by bundle (`b8216`)
 
 | Bundle key | Available backend modules in bundle |
 | --- | --- |

@@ -7,12 +7,12 @@ from playwright.sync_api import sync_playwright
 
 DEFAULT_APP_URL = "http://127.0.0.1:7357"
 DEFAULT_MODEL_URL = (
-    "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/"
-    "Qwen_Qwen3.5-0.8B-Q4_K_M.gguf?download=true"
+    "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/"
+    "Qwen3.5-0.8B-Q4_K_M.gguf?download=true"
 )
 DEFAULT_MMPROJ_URL = (
-    "https://huggingface.co/bartowski/Qwen_Qwen3.5-0.8B-GGUF/resolve/main/"
-    "mmproj-Qwen_Qwen3.5-0.8B-f16.gguf?download=true"
+    "https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/"
+    "mmproj-F16.gguf?download=true"
 )
 
 _DEFAULT_CHROMIUM_ARGS = [

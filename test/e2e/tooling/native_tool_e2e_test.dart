@@ -11,8 +11,8 @@ import '../../test_helper.dart';
 const models = [
   (
     url:
-        'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true',
-    file: 'qwen2.5-0.5b-instruct-q4_k_m.gguf',
+        'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf?download=true',
+    file: 'Qwen3.5-0.8B-Q4_K_M.gguf',
     expectTools: false, // Native template doesn't support tools yet
   ),
 ];

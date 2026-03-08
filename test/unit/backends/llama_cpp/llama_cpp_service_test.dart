@@ -260,6 +260,111 @@ void main() {
     });
   });
 
+  group('shouldUseConservativeAndroidVulkanContextConfig', () {
+    test('returns false off Android', () {
+      const params = ModelParams(
+        gpuLayers: 16,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(params),
+        isFalse,
+      );
+    });
+
+    test('returns true for Android Vulkan with GPU layers', () {
+      const params = ModelParams(
+        gpuLayers: 16,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(
+          params,
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('returns false for Android CPU mode', () {
+      const params = ModelParams(
+        gpuLayers: 0,
+        preferredBackend: GpuBackend.cpu,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(
+          params,
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('returns false after effective Vulkan fallback to zero layers', () {
+      const params = ModelParams(
+        gpuLayers: 16,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(
+          params,
+          resolvedGpuLayers: 0,
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('shouldEnableExperimentalAndroidVulkanAcceleration', () {
+    test('returns false off Android', () {
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          'Qwen3.5-0.8B-Q4_K_M.gguf',
+        ),
+        isFalse,
+      );
+    });
+
+    test('returns true for small Qwen3.5 models on Android', () {
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Qwen3.5-0.8B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Qwen3.5-2B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Qwen3.5-4B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('returns false for unrelated models on Android', () {
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Llama-3.2-3B.gguf',
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('resolveMtmdUseGpuForLoad', () {
     test('forces CPU mode to disable projector GPU offload', () {
       const params = ModelParams(
@@ -338,6 +443,40 @@ void main() {
       expect(
         LlamaCppService.parseBackendModuleDirectoryFromProcMaps(maps),
         isNull,
+      );
+    });
+
+    test('forces CPU projector mode for Android Qwen3.5 0.8B', () {
+      const params = ModelParams(
+        gpuLayers: ModelParams.maxGpuLayers,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.resolveMtmdUseGpuForLoad(
+          params,
+          ModelParams.maxGpuLayers,
+          modelPath: '/data/user/0/app/models/Qwen3.5-0.8B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('keeps projector GPU path for unrelated Android models', () {
+      const params = ModelParams(
+        gpuLayers: ModelParams.maxGpuLayers,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.resolveMtmdUseGpuForLoad(
+          params,
+          ModelParams.maxGpuLayers,
+          modelPath: '/data/user/0/app/models/Llama-3.2-3B.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
       );
     });
   });

@@ -136,6 +136,51 @@ abstract class BackendRuntimeDiagnostics {
   Future<int?> getResolvedGpuLayers();
 }
 
+/// Native performance timings reported by llama.cpp for the active context.
+class BackendPerfContextData {
+  /// Time spent loading the model in ms.
+  final double loadMs;
+
+  /// Time spent evaluating prompt tokens in ms.
+  final double promptEvalMs;
+
+  /// Time spent generating tokens in ms.
+  final double evalMs;
+
+  /// Time spent sampling generated tokens in ms.
+  final double sampleMs;
+
+  /// Number of prompt tokens evaluated.
+  final int promptEvalTokens;
+
+  /// Number of generated tokens evaluated.
+  final int evalTokens;
+
+  /// Number of sampler steps recorded.
+  final int sampleCount;
+
+  /// Number of times compute graphs were reused.
+  final int reusedGraphs;
+
+  /// Creates a new [BackendPerfContextData].
+  const BackendPerfContextData({
+    required this.loadMs,
+    required this.promptEvalMs,
+    required this.evalMs,
+    required this.sampleMs,
+    required this.promptEvalTokens,
+    required this.evalTokens,
+    required this.sampleCount,
+    required this.reusedGraphs,
+  });
+}
+
+/// Optional backend capability for exposing llama.cpp perf timings.
+abstract class BackendPerformanceDiagnostics {
+  /// Returns current native perf timings for [contextHandle] when available.
+  Future<BackendPerfContextData?> getPerformanceContext(int contextHandle);
+}
+
 /// Optional backend capability for generating text embeddings.
 abstract class BackendEmbeddings {
   /// Generates a single embedding vector for [text].

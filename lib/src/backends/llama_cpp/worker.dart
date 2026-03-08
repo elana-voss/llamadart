@@ -157,6 +157,21 @@ void llamaWorkerEntry(SendPort initialSendPort) {
             final layers = service.getResolvedGpuLayers();
             message.sendPort.send(ResolvedGpuLayersResponse(layers));
 
+          case PerformanceContextRequest():
+            final perf = service.getPerformanceContext(message.contextHandle);
+            message.sendPort.send(
+              PerformanceContextResponse(
+                loadMs: perf.loadMs,
+                promptEvalMs: perf.promptEvalMs,
+                evalMs: perf.evalMs,
+                sampleMs: perf.sampleMs,
+                promptEvalTokens: perf.promptEvalTokens,
+                evalTokens: perf.evalTokens,
+                sampleCount: perf.sampleCount,
+                reusedGraphs: perf.reusedGraphs,
+              ),
+            );
+
           case GpuSupportRequest():
             final supports = service.getGpuSupport();
             message.sendPort.send(GpuSupportResponse(supports));

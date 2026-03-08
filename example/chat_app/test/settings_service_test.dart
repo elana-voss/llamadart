@@ -76,5 +76,25 @@ void main() {
 
       expect(prefs.getInt('context_size'), 0);
     });
+
+    test('migrates saved Unsloth UD Qwen model paths to Q4_K_M', () async {
+      SharedPreferences.setMockInitialValues({
+        'model_path':
+            'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q4_K_XL.gguf?download=true',
+      });
+
+      final service = SettingsService();
+      final settings = await service.loadSettings();
+      final prefs = await SharedPreferences.getInstance();
+
+      expect(
+        settings.modelPath,
+        'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf?download=true',
+      );
+      expect(
+        prefs.getString('model_path'),
+        'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf?download=true',
+      );
+    });
   });
 }

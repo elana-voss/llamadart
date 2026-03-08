@@ -26,6 +26,17 @@ class SettingsService {
   static const _keyThinkingBudgetTokens = 'thinking_budget_tokens';
   static const _keySingleTurnMode = 'single_turn_mode';
 
+  static const Map<String, String> _modelPathMigrations = {
+    'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-UD-Q4_K_XL.gguf?download=true':
+        'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf?download=true',
+    'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-UD-Q4_K_XL.gguf?download=true':
+        'https://huggingface.co/unsloth/Qwen3.5-2B-GGUF/resolve/main/Qwen3.5-2B-Q4_K_M.gguf?download=true',
+    'https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-UD-Q4_K_XL.gguf?download=true':
+        'https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf?download=true',
+    'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-UD-Q4_K_XL.gguf?download=true':
+        'https://huggingface.co/unsloth/Qwen3.5-9B-GGUF/resolve/main/Qwen3.5-9B-Q4_K_M.gguf?download=true',
+  };
+
   LlamaLogLevel _parseLogLevel(int? index, LlamaLogLevel fallback) {
     if (index == null || index < 0 || index >= LlamaLogLevel.values.length) {
       return fallback;
@@ -35,6 +46,13 @@ class SettingsService {
 
   Future<ChatSettings> loadSettings() async {
     final prefs = await SharedPreferences.getInstance();
+    final savedModelPath = prefs.getString(_keyModelPath);
+    final migratedModelPath =
+        _modelPathMigrations[savedModelPath] ?? savedModelPath;
+    if (migratedModelPath != null && migratedModelPath != savedModelPath) {
+      await prefs.setString(_keyModelPath, migratedModelPath);
+    }
+
     final backendIndex = prefs.getInt(_keyBackend);
     final preferredBackend =
         backendIndex != null &&
@@ -51,7 +69,7 @@ class SettingsService {
     };
 
     return ChatSettings(
-      modelPath: prefs.getString(_keyModelPath),
+      modelPath: migratedModelPath,
       mmprojPath: prefs.getString(_keyMmprojPath),
       preferredBackend: preferredBackend,
       temperature: prefs.getDouble(_keyTemp) ?? 0.7,

@@ -8,7 +8,9 @@ For canonical full release notes, use:
 
 ## Unreleased
 
-- No entries yet.
+- Synced native hook pin to `leehack/llamadart-native@b8216`.
+- Updated default web bridge asset pinning to
+  `leehack/llama-web-bridge-assets@v0.1.9` (llama.cpp `b8216`).
 
 ## 0.6.5
 

@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
+import 'dart:ui' as ui;
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -39,6 +41,11 @@ class ChatProvider extends ChangeNotifier {
 ''';
   static const Duration _settingsSaveDebounceDelay = Duration(
     milliseconds: 220,
+  );
+  static const int _androidMultimodalMaxImageEdge = 384;
+  static const String _androidDebugImagePath = String.fromEnvironment(
+    'LLAMADART_CHAT_APP_DEBUG_IMAGE_PATH',
+    defaultValue: '',
   );
 
   final ChatService _chatService;
@@ -96,6 +103,12 @@ class ChatProvider extends ChangeNotifier {
   int? _lastGenerationLatencyMs;
   double? _lastTokensPerSecond;
   double? _lastDecodeTokensPerSecond;
+  int? _lastNativePromptEvalMs;
+  int? _lastNativeEvalMs;
+  int? _lastNativeSampleMs;
+  int? _lastNativePromptEvalTokens;
+  int? _lastNativeEvalTokens;
+  int? _lastNativeReusedGraphs;
 
   List<String> _availableDevices = [];
 
@@ -150,8 +163,15 @@ class ChatProvider extends ChangeNotifier {
   int? get lastGenerationLatencyMs => _lastGenerationLatencyMs;
   double? get lastTokensPerSecond => _lastTokensPerSecond;
   double? get lastDecodeTokensPerSecond => _lastDecodeTokensPerSecond;
+  int? get lastNativePromptEvalMs => _lastNativePromptEvalMs;
+  int? get lastNativeEvalMs => _lastNativeEvalMs;
+  int? get lastNativeSampleMs => _lastNativeSampleMs;
+  int? get lastNativePromptEvalTokens => _lastNativePromptEvalTokens;
+  int? get lastNativeEvalTokens => _lastNativeEvalTokens;
+  int? get lastNativeReusedGraphs => _lastNativeReusedGraphs;
   bool get hasConfiguredMmproj =>
       (_settings.mmprojPath ?? '').trim().isNotEmpty;
+  bool get isMmprojLoaded => _mmprojLoaded;
   bool get canAttachMedia =>
       _supportsVision || _supportsAudio || (_isLoaded && hasConfiguredMmproj);
   String get activeModelName {
@@ -620,6 +640,15 @@ class ChatProvider extends ChangeNotifier {
       _runtimeModelCacheState = runtimeDiagnostics.runtimeModelCacheState;
       _publishWebRuntimeDiagnosticsHints();
 
+      if (!kIsWeb &&
+          defaultTargetPlatform == TargetPlatform.android &&
+          (_runtimeGpuLayers ?? 0) > 0 &&
+          _activeBackend.toUpperCase().contains('VULKAN')) {
+        _addInfoMessage(
+          'Android Vulkan stability mode is active. Prompt batching is reduced to avoid driver crashes, so first-token latency can be higher.',
+        );
+      }
+
       _addInfoMessage('Model loaded successfully! Ready to chat.');
       _isLoaded = true;
       _loadedModelPath = _settings.modelPath;
@@ -651,6 +680,12 @@ class ChatProvider extends ChangeNotifier {
     _stagedParts.clear();
     _lastTokensPerSecond = null;
     _lastDecodeTokensPerSecond = null;
+    _lastNativePromptEvalMs = null;
+    _lastNativeEvalMs = null;
+    _lastNativeSampleMs = null;
+    _lastNativePromptEvalTokens = null;
+    _lastNativeEvalTokens = null;
+    _lastNativeReusedGraphs = null;
     _messages.add(
       ChatMessage(
         text: 'Conversation cleared. Ready for a new topic!',
@@ -817,8 +852,7 @@ class ChatProvider extends ChangeNotifier {
       _mmprojLoaded = false;
     }
 
-    final mmprojPath = (_settings.mmprojPath ?? '').trim();
-    if (mmprojPath.isEmpty) {
+    if (!hasConfiguredMmproj) {
       _addInfoMessage(
         'This model was loaded without an mmproj. Configure a matching mmproj in Manage models to send media.',
       );
@@ -826,22 +860,9 @@ class ChatProvider extends ChangeNotifier {
       return false;
     }
 
-    try {
-      await _chatService.loadMultimodalProjector(mmprojPath);
-      _mmprojLoaded = true;
-      _supportsVision = await _chatService.engine.supportsVision;
-      _supportsAudio = await _chatService.engine.supportsAudio;
-      _addInfoMessage('Multimodal projector loaded on demand.');
-      notifyListeners();
-      return true;
-    } catch (error) {
-      final text = error.toString();
-      _addInfoMessage(
-        text.startsWith('Exception: ') ? text.substring(11) : text,
-      );
-      notifyListeners();
-      return false;
-    }
+    return loadConfiguredMmproj(
+      successMessage: 'Multimodal projector loaded on demand.',
+    );
   }
 
   List<ToolDefinition>? _toolsForTurn() {
@@ -1105,6 +1126,32 @@ class ChatProvider extends ChangeNotifier {
         _lastDecodeTokensPerSecond = null;
       }
 
+      try {
+        final perf = await _chatService.engine.getPerformanceContext();
+        if (perf != null) {
+          _lastNativePromptEvalMs = perf.promptEvalMs.round();
+          _lastNativeEvalMs = perf.evalMs.round();
+          _lastNativeSampleMs = perf.sampleMs.round();
+          _lastNativePromptEvalTokens = perf.promptEvalTokens;
+          _lastNativeEvalTokens = perf.evalTokens;
+          _lastNativeReusedGraphs = perf.reusedGraphs;
+        } else {
+          _lastNativePromptEvalMs = null;
+          _lastNativeEvalMs = null;
+          _lastNativeSampleMs = null;
+          _lastNativePromptEvalTokens = null;
+          _lastNativeEvalTokens = null;
+          _lastNativeReusedGraphs = null;
+        }
+      } catch (_) {
+        _lastNativePromptEvalMs = null;
+        _lastNativeEvalMs = null;
+        _lastNativeSampleMs = null;
+        _lastNativePromptEvalTokens = null;
+        _lastNativeEvalTokens = null;
+        _lastNativeReusedGraphs = null;
+      }
+
       if (generationResult.firstTokenLatencyMs != null ||
           generationResult.fullResponse.isNotEmpty ||
           generationResult.fullThinking.isNotEmpty) {
@@ -1240,9 +1287,27 @@ class ChatProvider extends ChangeNotifier {
   }
 
   Future<void> pickImage() async {
+    if (!kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        _androidDebugImagePath.isNotEmpty) {
+      final prepared = await _prepareAndroidImagePart(_androidDebugImagePath);
+      if (prepared != null) {
+        _addStagedPart(prepared);
+        return;
+      }
+    }
+
     await _pickMediaPart(
       type: FileType.image,
-      fromPath: (path) => LlamaImageContent(path: path),
+      fromPath: (path) async {
+        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
+          final prepared = await _prepareAndroidImagePart(path);
+          if (prepared != null) {
+            return prepared;
+          }
+        }
+        return LlamaImageContent(path: path);
+      },
       fromBytes: (bytes) => LlamaImageContent(bytes: bytes),
       browserReadError:
           'Could not read image bytes in browser. Try a different image file.',
@@ -1254,7 +1319,7 @@ class ChatProvider extends ChangeNotifier {
   Future<void> pickAudio() async {
     await _pickMediaPart(
       type: FileType.audio,
-      fromPath: (path) => LlamaAudioContent(path: path),
+      fromPath: (path) async => LlamaAudioContent(path: path),
       fromBytes: (bytes) => LlamaAudioContent(bytes: bytes),
       browserReadError:
           'Could not read audio bytes in browser. Try a different audio file.',
@@ -1265,7 +1330,7 @@ class ChatProvider extends ChangeNotifier {
 
   Future<void> _pickMediaPart({
     required FileType type,
-    required LlamaContentPart Function(String path) fromPath,
+    required Future<LlamaContentPart> Function(String path) fromPath,
     required LlamaContentPart Function(Uint8List bytes) fromBytes,
     required String browserReadError,
     required String fileReadError,
@@ -1296,7 +1361,7 @@ class ChatProvider extends ChangeNotifier {
 
       final path = file.path;
       if (path != null && path.isNotEmpty) {
-        _addStagedPart(fromPath(path));
+        _addStagedPart(await fromPath(path));
         return;
       }
 
@@ -1310,6 +1375,68 @@ class ChatProvider extends ChangeNotifier {
       notifyListeners();
     } catch (error) {
       debugPrint('Error picking $debugLabel: $error');
+    }
+  }
+
+  Future<LlamaImageContent?> _prepareAndroidImagePart(String path) async {
+    try {
+      final bytes = await File(path).readAsBytes();
+      if (bytes.isEmpty) {
+        return null;
+      }
+
+      final resizedBytes = await _downscaleImageBytesIfNeeded(
+        bytes,
+        maxEdge: _androidMultimodalMaxImageEdge,
+      );
+      return LlamaImageContent(bytes: resizedBytes);
+    } catch (error) {
+      debugPrint('Error preparing Android image bytes: $error');
+      return null;
+    }
+  }
+
+  Future<Uint8List> _downscaleImageBytesIfNeeded(
+    Uint8List bytes, {
+    required int maxEdge,
+  }) async {
+    ui.Codec? probeCodec;
+    ui.Codec? resizedCodec;
+    ui.Image? probedImage;
+    ui.Image? resizedImage;
+
+    try {
+      probeCodec = await ui.instantiateImageCodec(bytes);
+      final probeFrame = await probeCodec.getNextFrame();
+      probedImage = probeFrame.image;
+      final width = probedImage.width;
+      final height = probedImage.height;
+      final longestEdge = math.max(width, height);
+      if (longestEdge <= maxEdge) {
+        return bytes;
+      }
+
+      final scale = maxEdge / longestEdge;
+      final targetWidth = math.max(1, (width * scale).round());
+      final targetHeight = math.max(1, (height * scale).round());
+      resizedCodec = await ui.instantiateImageCodec(
+        bytes,
+        targetWidth: targetWidth,
+        targetHeight: targetHeight,
+      );
+      final resizedFrame = await resizedCodec.getNextFrame();
+      resizedImage = resizedFrame.image;
+      final byteData = await resizedImage.toByteData(
+        format: ui.ImageByteFormat.png,
+      );
+      return byteData?.buffer.asUint8List() ?? bytes;
+    } catch (_) {
+      return bytes;
+    } finally {
+      resizedImage?.dispose();
+      resizedCodec?.dispose();
+      probedImage?.dispose();
+      probeCodec?.dispose();
     }
   }
 
@@ -1467,6 +1594,21 @@ class ChatProvider extends ChangeNotifier {
   void applyModelPreset(DownloadableModel model) {
     final shouldKeepToolsEnabled =
         model.supportsToolCalling && _settings.toolsEnabled;
+    const androidCpuPreferredQwenModels = <String>{
+      'Qwen3.5 0.8B Instruct',
+      'Qwen3.5 2B Instruct',
+    };
+    final shouldUseReducedAndroidContext =
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        model.name == 'Qwen3.5 0.8B Instruct';
+    final shouldPreferCpuOnAndroid =
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        androidCpuPreferredQwenModels.contains(model.name) &&
+        (_settings.preferredBackend == GpuBackend.auto ||
+            _settings.preferredBackend == GpuBackend.vulkan ||
+            _settings.preferredBackend == GpuBackend.cpu);
 
     _updateSettings(
       _settings.copyWith(
@@ -1475,15 +1617,27 @@ class ChatProvider extends ChangeNotifier {
         topP: model.preset.topP,
         minP: model.preset.minP,
         penalty: model.preset.penalty,
-        contextSize: model.preset.contextSize,
+        contextSize: shouldUseReducedAndroidContext
+            ? 2048
+            : model.preset.contextSize,
         maxTokens: model.preset.maxTokens,
-        gpuLayers: model.preset.gpuLayers,
+        gpuLayers: shouldPreferCpuOnAndroid ? 0 : model.preset.gpuLayers,
+        preferredBackend: shouldPreferCpuOnAndroid
+            ? GpuBackend.cpu
+            : _settings.preferredBackend,
         toolsEnabled: shouldKeepToolsEnabled,
         thinkingEnabled: model.preset.thinkingEnabled,
         thinkingBudgetTokens: model.preset.thinkingBudgetTokens,
         singleTurnMode: false,
       ),
     );
+
+    if (shouldPreferCpuOnAndroid) {
+      _addInfoMessage(
+        'On Android, Qwen3.5 0.8B/2B currently run faster and more reliably in CPU mode than Vulkan. You can switch back manually in Inference settings if you want to compare.',
+      );
+      notifyListeners();
+    }
   }
 
   void _updateToolTemplateSupport(Map<String, String> metadata) {
@@ -1553,9 +1707,64 @@ class ChatProvider extends ChangeNotifier {
     _updateSettings(_settings.copyWith(mmprojPath: path));
   }
 
-  void clearMmprojPath() {
-    if ((_settings.mmprojPath ?? '').isEmpty) {
+  Future<bool> loadConfiguredMmproj({
+    String successMessage = 'Multimodal projector loaded.',
+  }) async {
+    final mmprojPath = (_settings.mmprojPath ?? '').trim();
+    if (mmprojPath.isEmpty) {
+      _addInfoMessage(
+        'No mmproj is configured for the active model. Select a multimodal preset or add a matching mmproj first.',
+      );
+      notifyListeners();
+      return false;
+    }
+
+    if (!_isLoaded || !_chatService.engine.isReady) {
+      _addInfoMessage('Load the model first, then enable mmproj.');
+      notifyListeners();
+      return false;
+    }
+
+    if (_mmprojLoaded && _loadedMmprojPath == mmprojPath) {
+      _supportsVision = await _chatService.engine.supportsVision;
+      _supportsAudio = await _chatService.engine.supportsAudio;
+      notifyListeners();
+      return true;
+    }
+
+    try {
+      await _chatService.loadMultimodalProjector(mmprojPath);
+      _mmprojLoaded = true;
+      _loadedMmprojPath = mmprojPath;
+      _supportsVision = await _chatService.engine.supportsVision;
+      _supportsAudio = await _chatService.engine.supportsAudio;
+      _addInfoMessage(successMessage);
+      notifyListeners();
+      return true;
+    } catch (error) {
+      final text = error.toString();
+      _addInfoMessage(
+        text.startsWith('Exception: ') ? text.substring(11) : text,
+      );
+      notifyListeners();
+      return false;
+    }
+  }
+
+  Future<void> clearMmprojPath() async {
+    if ((_settings.mmprojPath ?? '').isEmpty && !_mmprojLoaded) {
       return;
+    }
+
+    if (_mmprojLoaded) {
+      try {
+        await _chatService.unloadMultimodalProjector();
+      } catch (error) {
+        debugPrint('Failed to unload active mmproj: $error');
+        _addInfoMessage(
+          'Failed to unload the active mmproj cleanly. Reload the model if text output still looks wrong.',
+        );
+      }
     }
 
     _updateSettings(_settings.copyWith(mmprojPath: ''));
@@ -1563,7 +1772,9 @@ class ChatProvider extends ChangeNotifier {
     _supportsVision = false;
     _supportsAudio = false;
     _mmprojLoaded = false;
-    _addInfoMessage('Multimodal projector cleared. Reload model to apply.');
+    _addInfoMessage(
+      'Switched to text-only mode. Multimodal projector cleared.',
+    );
     notifyListeners();
   }
 

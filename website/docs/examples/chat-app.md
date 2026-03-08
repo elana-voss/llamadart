@@ -33,5 +33,5 @@ flutter test
 
 ## Web notes
 
-On web, this example uses bridge runtime assets with local-first loading and CDN
+On web, this example uses bridge runtime assets with CDN-first loading and local
 fallback behavior.

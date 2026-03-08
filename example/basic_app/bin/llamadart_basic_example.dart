@@ -5,7 +5,7 @@ import 'package:llamadart_basic_example/services/model_service.dart';
 import 'package:llamadart_basic_example/services/llama_service.dart';
 
 const defaultModelUrl =
-    'https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf?download=true';
+    'https://huggingface.co/unsloth/Qwen3.5-0.8B-GGUF/resolve/main/Qwen3.5-0.8B-Q4_K_M.gguf?download=true';
 
 void main(List<String> arguments) async {
   final parser = ArgParser()
@@ -49,19 +49,19 @@ void main(List<String> arguments) async {
     )
     ..addOption(
       'temp',
-      help: 'Generation temperature (default: 0.8)',
-      defaultsTo: '0.8',
+      help: 'Generation temperature (default: 0.7)',
+      defaultsTo: '0.7',
     )
-    ..addOption('top-k', help: 'Top-k sampling (default: 40)', defaultsTo: '40')
+    ..addOption('top-k', help: 'Top-k sampling (default: 20)', defaultsTo: '20')
     ..addOption(
       'top-p',
-      help: 'Top-p sampling (default: 0.95)',
-      defaultsTo: '0.95',
+      help: 'Top-p sampling (default: 0.8)',
+      defaultsTo: '0.8',
     )
     ..addOption(
       'penalty',
-      help: 'Repeat penalty (default: 1.1)',
-      defaultsTo: '1.1',
+      help: 'Repeat penalty (default: 1.0)',
+      defaultsTo: '1.0',
     )
     ..addFlag(
       'help',

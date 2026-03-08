@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:llamadart/llamadart.dart';
@@ -66,17 +67,13 @@ class ChatService {
       );
     }
 
+    final modelParams = _buildModelParams(settings);
+
     try {
       if (settings.modelPath!.startsWith('http')) {
         await _engine.loadModelFromUrl(
           settings.modelPath!,
-          modelParams: ModelParams(
-            gpuLayers: settings.gpuLayers,
-            preferredBackend: settings.preferredBackend,
-            contextSize: settings.contextSize,
-            numberOfThreads: settings.numberOfThreads,
-            numberOfThreadsBatch: settings.numberOfThreadsBatch,
-          ),
+          modelParams: modelParams,
           onProgress: onProgress == null
               ? null
               : (progress) {
@@ -85,16 +82,7 @@ class ChatService {
                 },
         );
       } else {
-        await _engine.loadModel(
-          settings.modelPath!,
-          modelParams: ModelParams(
-            gpuLayers: settings.gpuLayers,
-            preferredBackend: settings.preferredBackend,
-            contextSize: settings.contextSize,
-            numberOfThreads: settings.numberOfThreads,
-            numberOfThreadsBatch: settings.numberOfThreadsBatch,
-          ),
-        );
+        await _engine.loadModel(settings.modelPath!, modelParams: modelParams);
       }
 
       emitProgress(1.0);
@@ -107,6 +95,70 @@ class ChatService {
         settings.mmprojPath!.isNotEmpty) {
       await loadMultimodalProjector(settings.mmprojPath!);
     }
+  }
+
+  bool _isQwen35SmallModel(String? modelPath) {
+    final normalized = (modelPath ?? '').toLowerCase();
+    return normalized.contains('qwen3.5-0.8b') ||
+        normalized.contains('qwen_qwen3.5-0.8b');
+  }
+
+  ModelParams _buildModelParams(ChatSettings settings) {
+    final isAndroidNative =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final usesGpuBackend = settings.preferredBackend != GpuBackend.cpu;
+    final usesVulkanBackend =
+        settings.preferredBackend == GpuBackend.vulkan ||
+        settings.preferredBackend == GpuBackend.auto;
+    final safeContextSize = settings.contextSize > 0
+        ? settings.contextSize
+        : 4096;
+    final isQwen35Small = _isQwen35SmallModel(settings.modelPath);
+
+    int resolvedThreads = settings.numberOfThreads;
+    int resolvedThreadsBatch = settings.numberOfThreadsBatch;
+    if (isAndroidNative && isQwen35Small) {
+      if (settings.preferredBackend == GpuBackend.cpu) {
+        if (resolvedThreads <= 0) {
+          resolvedThreads = 4;
+        }
+        if (resolvedThreadsBatch <= 0) {
+          resolvedThreadsBatch = resolvedThreads;
+        }
+      } else if (usesVulkanBackend) {
+        if (resolvedThreads <= 0) {
+          resolvedThreads = 2;
+        }
+        if (resolvedThreadsBatch <= 0) {
+          resolvedThreadsBatch = resolvedThreads;
+        }
+      }
+    }
+
+    var batchSize = 0;
+    var microBatchSize = 0;
+    if (isAndroidNative && usesGpuBackend) {
+      if (usesVulkanBackend) {
+        final preferredBatchCap = _isQwen35SmallModel(settings.modelPath)
+            ? 64
+            : 32;
+        batchSize = math.min(safeContextSize, preferredBatchCap);
+        microBatchSize = 1;
+      } else {
+        batchSize = math.min(safeContextSize, 256);
+        microBatchSize = math.min(batchSize, 64);
+      }
+    }
+
+    return ModelParams(
+      gpuLayers: settings.gpuLayers,
+      preferredBackend: settings.preferredBackend,
+      contextSize: settings.contextSize,
+      numberOfThreads: resolvedThreads,
+      numberOfThreadsBatch: resolvedThreadsBatch,
+      batchSize: batchSize,
+      microBatchSize: microBatchSize,
+    );
   }
 
   /// Loads multimodal projector for image/audio requests.
@@ -123,6 +175,16 @@ class ChatService {
         'Failed to load multimodal projector ($mmprojPath). '
         'Please verify this mmproj matches the selected model.',
       );
+    }
+  }
+
+  /// Unloads the active multimodal projector while keeping the model loaded.
+  Future<void> unloadMultimodalProjector() async {
+    try {
+      await _engine.unloadMultimodalProjector();
+    } catch (e) {
+      debugPrint('Failed to unload multimodal projector: $e');
+      rethrow;
     }
   }
 

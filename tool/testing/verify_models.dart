@@ -91,13 +91,14 @@ final modelMatrix = [
         'You are a helpful assistant. You MUST use <think> tags for reasoning. When you need to use a tool, output: <tool_call>{"name": "tool_name", "arguments": {"arg": "value"}}</tool_call>',
   ),
   ModelInfo(
-    name: 'Qwen3-4B',
-    category: 'thinking + tool',
-    fileName: 'Qwen3-4B-Q4_K_M.gguf',
+    name: 'Qwen3.5-4B',
+    category: 'tool',
+    fileName: 'Qwen3.5-4B-Q4_K_M.gguf',
     downloadUrl:
-        'https://huggingface.co/unsloth/Qwen3-4B-GGUF/resolve/main/Qwen3-4B-Q4_K_M.gguf?download=true',
-    temp: 0.0,
+        'https://huggingface.co/unsloth/Qwen3.5-4B-GGUF/resolve/main/Qwen3.5-4B-Q4_K_M.gguf?download=true',
+    temp: 0.7,
     topP: 0.8,
+    topK: 20,
     contextSize: 4096,
   ),
   ModelInfo(

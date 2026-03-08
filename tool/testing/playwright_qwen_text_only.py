@@ -15,6 +15,13 @@ def main() -> int:
     parser.add_argument("model_url", nargs="?", default=DEFAULT_MODEL_URL)
     parser.add_argument("--channel", type=str, default="chromium")
     parser.add_argument("--headed", action="store_true")
+    parser.add_argument("--load-timeout-ms", type=int, default=8 * 60 * 1000)
+    parser.add_argument("--inference-timeout-ms", type=int, default=3 * 60 * 1000)
+    parser.add_argument("--gpu-layers", type=int, default=99)
+    parser.add_argument("--thread-pool-size", type=int, default=4)
+    parser.add_argument("--threads", type=int, default=4)
+    parser.add_argument("--use-cache", action="store_true")
+    parser.add_argument("--echo-console", action="store_true")
     args = parser.parse_args()
 
     payload = run_bridge_evaluation(
@@ -23,9 +30,10 @@ def main() -> int:
         headed=args.headed,
         default_timeout_ms=0,
         console_tail_count=8,
+        echo_console=args.echo_console,
         evaluate_script=
         """
-            async ({ modelUrl }) => {
+            async ({ modelUrl, loadTimeoutMs, inferenceTimeoutMs, gpuLayers, threadPoolSize, threads, useCache }) => {
               const withTimeout = (promise, ms, label) =>
                 Promise.race([
                   promise,
@@ -56,10 +64,7 @@ def main() -> int:
                     ? window.__llamadartBridgeWasmUrlMem64
                     : undefined,
                 preferMemory64: window.__llamadartBridgePreferMemory64 === true,
-                threadPoolSize:
-                  Number.isFinite(Number(window.__llamadartBridgeThreadPoolSize))
-                    ? Number(window.__llamadartBridgeThreadPoolSize)
-                    : undefined,
+                threadPoolSize,
                 logLevel: 3,
               };
 
@@ -71,12 +76,20 @@ def main() -> int:
                 await withTimeout(
                   bridge.loadModelFromUrl(modelUrl, {
                     nCtx: 4096,
-                    nGpuLayers: 99,
-                    nThreads: 4,
-                    useCache: false,
+                    nGpuLayers: gpuLayers,
+                    nThreads: threads,
+                    nThreadsBatch: threads,
+                    useCache,
                     remoteFetchThresholdBytes: 9000000000000,
+                    progressCallback: (progress) => {
+                      const loaded = Number(progress?.loaded || 0);
+                      const total = Number(progress?.total || 0);
+                      if (loaded > 0) {
+                        console.log(`qwen-load-progress ${loaded}/${total || loaded}`);
+                      }
+                    },
                   }),
-                  8 * 60 * 1000,
+                  loadTimeoutMs,
                   'loadModelFromUrl',
                 );
                 timings.modelLoadMs = Math.round(performance.now() - loadStart);
@@ -97,7 +110,7 @@ def main() -> int:
                       },
                     },
                   ),
-                  3 * 60 * 1000,
+                  inferenceTimeoutMs,
                   'createCompletion',
                 );
                 timings.inferenceMs = Math.round(performance.now() - inferStart);
@@ -132,7 +145,15 @@ def main() -> int:
               }
             }
             """,
-        payload={"modelUrl": args.model_url},
+        payload={
+            "modelUrl": args.model_url,
+            "loadTimeoutMs": args.load_timeout_ms,
+            "inferenceTimeoutMs": args.inference_timeout_ms,
+            "gpuLayers": args.gpu_layers,
+            "threadPoolSize": args.thread_pool_size,
+            "threads": args.threads,
+            "useCache": args.use_cache,
+        },
     )
 
     print_json_result(payload)

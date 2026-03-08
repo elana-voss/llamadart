@@ -23,6 +23,14 @@ class RuntimeStatusPanel extends StatelessWidget {
         int?,
         int?,
         int?,
+        int?,
+        int?,
+        int?,
+        int?,
+        int?,
+        int?,
+        bool,
+        bool,
         String?,
         String?,
         String?,
@@ -41,9 +49,17 @@ class RuntimeStatusPanel extends StatelessWidget {
         provider.lastDecodeTokensPerSecond,
         provider.lastFirstTokenLatencyMs,
         provider.lastGenerationLatencyMs,
+        provider.lastNativePromptEvalMs,
+        provider.lastNativeEvalMs,
+        provider.lastNativeSampleMs,
+        provider.lastNativePromptEvalTokens,
+        provider.lastNativeEvalTokens,
+        provider.lastNativeReusedGraphs,
         provider.runtimeGpuLayers,
         provider.runtimeThreads,
         provider.runtimeThreadPoolSize,
+        provider.hasConfiguredMmproj,
+        provider.isMmprojLoaded,
         provider.runtimeExecution,
         provider.runtimeCoreVariant,
         provider.runtimeWorkerFallbackReason,
@@ -62,9 +78,17 @@ class RuntimeStatusPanel extends StatelessWidget {
           decodeTokensPerSecond,
           firstTokenLatencyMs,
           generationLatencyMs,
+          nativePromptEvalMs,
+          nativeEvalMs,
+          nativeSampleMs,
+          nativePromptEvalTokens,
+          nativeEvalTokens,
+          nativeReusedGraphs,
           runtimeGpuLayers,
           runtimeThreads,
           runtimeThreadPoolSize,
+          hasConfiguredMmproj,
+          isMmprojLoaded,
           runtimeExecution,
           runtimeCoreVariant,
           runtimeWorkerFallbackReason,
@@ -119,6 +143,34 @@ class RuntimeStatusPanel extends StatelessWidget {
                   icon: Icons.timer_outlined,
                   text: 'total ${generationLatencyMs}ms',
                 ),
+              if (nativePromptEvalMs != null)
+                _chip(
+                  context,
+                  icon: Icons.input_rounded,
+                  text: nativePromptEvalTokens != null
+                      ? 'p_eval ${nativePromptEvalMs}ms/$nativePromptEvalTokens tok'
+                      : 'p_eval ${nativePromptEvalMs}ms',
+                ),
+              if (nativeEvalMs != null)
+                _chip(
+                  context,
+                  icon: Icons.auto_awesome_rounded,
+                  text: nativeEvalTokens != null
+                      ? 'eval ${nativeEvalMs}ms/$nativeEvalTokens tok'
+                      : 'eval ${nativeEvalMs}ms',
+                ),
+              if (nativeSampleMs != null)
+                _chip(
+                  context,
+                  icon: Icons.tune_rounded,
+                  text: 'sample ${nativeSampleMs}ms',
+                ),
+              if (nativeReusedGraphs != null)
+                _chip(
+                  context,
+                  icon: Icons.repeat_rounded,
+                  text: 'reuse $nativeReusedGraphs',
+                ),
               if (runtimeGpuLayers != null)
                 _chip(
                   context,
@@ -136,6 +188,18 @@ class RuntimeStatusPanel extends StatelessWidget {
                   context,
                   icon: Icons.hub_outlined,
                   text: 'pool $runtimeThreadPoolSize',
+                ),
+              if (isMmprojLoaded)
+                _chip(
+                  context,
+                  icon: Icons.visibility_rounded,
+                  text: 'mmproj loaded',
+                )
+              else if (hasConfiguredMmproj)
+                _chip(
+                  context,
+                  icon: Icons.visibility_outlined,
+                  text: 'mmproj cfg',
                 ),
               if (runtimeExecution != null)
                 _chip(

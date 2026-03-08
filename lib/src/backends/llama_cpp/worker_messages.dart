@@ -204,6 +204,15 @@ class ResolvedGpuLayersRequest extends WorkerRequest {
   ResolvedGpuLayersRequest(super.sendPort);
 }
 
+/// Request for native llama.cpp perf timings of an active context.
+class PerformanceContextRequest extends WorkerRequest {
+  /// The handle of the context.
+  final int contextHandle;
+
+  /// Creates a new [PerformanceContextRequest].
+  PerformanceContextRequest(this.contextHandle, super.sendPort);
+}
+
 /// Request to check for GPU support.
 class GpuSupportRequest extends WorkerRequest {
   /// Creates a new [GpuSupportRequest].
@@ -413,6 +422,45 @@ class ResolvedGpuLayersResponse {
 
   /// Creates a new [ResolvedGpuLayersResponse].
   ResolvedGpuLayersResponse(this.layers);
+}
+
+/// Response containing native llama.cpp perf timings.
+class PerformanceContextResponse {
+  /// Model load time in ms.
+  final double loadMs;
+
+  /// Prompt evaluation time in ms.
+  final double promptEvalMs;
+
+  /// Decode evaluation time in ms.
+  final double evalMs;
+
+  /// Sampling time in ms.
+  final double sampleMs;
+
+  /// Number of prompt-evaluated tokens.
+  final int promptEvalTokens;
+
+  /// Number of generated tokens.
+  final int evalTokens;
+
+  /// Number of sampled tokens.
+  final int sampleCount;
+
+  /// Number of times graphs were reused.
+  final int reusedGraphs;
+
+  /// Creates a new [PerformanceContextResponse].
+  PerformanceContextResponse({
+    required this.loadMs,
+    required this.promptEvalMs,
+    required this.evalMs,
+    required this.sampleMs,
+    required this.promptEvalTokens,
+    required this.evalTokens,
+    required this.sampleCount,
+    required this.reusedGraphs,
+  });
 }
 
 /// Response containing system information.

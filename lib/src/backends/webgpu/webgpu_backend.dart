@@ -26,6 +26,7 @@ class WebGpuLlamaBackend
   static const int _defaultRemoteFetchChunkBytes = 4 * 1024 * 1024;
   static const int _minRemoteFetchChunkBytes = 4 * 1024;
   static const int _maxRemoteFetchChunkBytes = 16 * 1024 * 1024;
+  static const int _qwen35SmallSafeWebGpuLayers = 2;
   static const int _gpuMultimodalMaxImagePixels = 1048576;
   static const int _gpuMultimodalMaxImageEdge = 1280;
   static const Duration _webGpuMultimodalWarmupTimeout = Duration(seconds: 12);
@@ -609,9 +610,33 @@ class WebGpuLlamaBackend
       return (nBatch: null, nUbatch: null);
     }
 
-    final tunedBatch = params.contextSize >= 4096 ? 768 : 512;
-    final tunedUbatch = tunedBatch >= 768 ? 256 : 192;
+    final tunedBatch = 32;
+    final tunedUbatch = 8;
     return (nBatch: tunedBatch, nUbatch: tunedUbatch);
+  }
+
+  int _resolveSafeRequestedGpuLayers({
+    required String url,
+    required ModelParams params,
+    required int requestedGpuLayers,
+  }) {
+    if (requestedGpuLayers <= 0 || params.preferredBackend == GpuBackend.cpu) {
+      return requestedGpuLayers;
+    }
+
+    final normalizedUrl = url.toLowerCase();
+    final isQwen35Small =
+        normalizedUrl.contains('qwen3.5-0.8b') ||
+        normalizedUrl.contains('qwen_qwen3.5-0.8b');
+    if (!isQwen35Small) {
+      return requestedGpuLayers;
+    }
+
+    if (requestedGpuLayers < 0) {
+      return _qwen35SmallSafeWebGpuLayers;
+    }
+
+    return math.min(requestedGpuLayers, _qwen35SmallSafeWebGpuLayers);
   }
 
   Map<String, String> _collectBridgeRuntimeHints(LlamaWebGpuBridge bridge) {
@@ -811,6 +836,20 @@ class WebGpuLlamaBackend
         'Use bridge assets with adaptive Safari GPU probe support, or set '
         'window.__llamadartAllowSafariWebGpu = true to bypass this safeguard.',
       );
+    }
+
+    final resolvedGpuLayers = _resolveSafeRequestedGpuLayers(
+      url: url,
+      params: params,
+      requestedGpuLayers: requestedGpuLayers,
+    );
+    if (resolvedGpuLayers != requestedGpuLayers) {
+      _emitConsoleText(
+        LlamaLogLevel.info,
+        'WebGpuLlamaBackend: Capping Qwen3.5-0.8B WebGPU layers '
+        'from $requestedGpuLayers to $resolvedGpuLayers for stable browser output.',
+      );
+      requestedGpuLayers = resolvedGpuLayers;
     }
 
     final progressCallback = onProgress == null
@@ -1642,7 +1681,7 @@ class WebGpuLlamaBackend
       mediaMaxImageEdge: mediaMaxImageEdge,
       onToken: onToken as JSFunction,
       emitCurrentTextOnToken: hasStopSequences,
-      tokenEventEncoding: 'text',
+      tokenEventEncoding: 'bytes',
       tokenEventFlushMs: tokenEventFlushMs,
       tokenEventFlushChars: tokenEventFlushChars,
       parts: mediaParts,
@@ -1857,8 +1896,6 @@ class WebGpuLlamaBackend
     '<|begin_of_text|>',
     '<|begin_of_sentence|>',
     '<|start_of_text|>',
-    '<|im_start|>',
-    '<|START_OF_TURN_TOKEN|>',
     '<｜begin▁of▁sentence｜>',
     '[gMASK]<sop>',
   ];

@@ -360,6 +360,20 @@ void main() {
       expect(await engine.supportsAudio, false);
     });
 
+    test(
+      'multimodal projector can be unloaded without unloading model',
+      () async {
+        await engine.loadModel('qwen-test.gguf');
+        await engine.loadMultimodalProjector('proj.gguf');
+
+        await engine.unloadMultimodalProjector();
+
+        expect(await engine.supportsVision, isFalse);
+        expect(await engine.supportsAudio, isFalse);
+        expect(engine.isReady, isTrue);
+      },
+    );
+
     test('tokenize and detokenize', () async {
       await engine.loadModel('qwen-test.gguf');
       final tokens = await engine.tokenize('hello');

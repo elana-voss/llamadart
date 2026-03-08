@@ -216,6 +216,10 @@ class LlamaEngine {
     LlamaLogger.instance.info('Loading multimodal projector: $mmProjName');
     _ensureReady(requireContext: false);
     try {
+      if (_mmContextHandle != null) {
+        await unloadMultimodalProjector();
+      }
+
       _mmContextHandle = await backend.multimodalContextCreate(
         _modelHandle!,
         mmProjPath,
@@ -231,6 +235,18 @@ class LlamaEngine {
       );
       rethrow;
     }
+  }
+
+  /// Unloads the active multimodal projector while keeping the model loaded.
+  Future<void> unloadMultimodalProjector() async {
+    final mmContextHandle = _mmContextHandle;
+    if (mmContextHandle == null) {
+      return;
+    }
+
+    LlamaLogger.instance.info('Unloading multimodal projector');
+    _mmContextHandle = null;
+    await backend.multimodalContextFree(mmContextHandle);
   }
 
   /// Releases all allocated resources.
@@ -1055,6 +1071,21 @@ class LlamaEngine {
       return (candidate as BackendRuntimeDiagnostics).getResolvedGpuLayers();
     }
     return Future<int?>.value(null);
+  }
+
+  /// Returns native llama.cpp perf timings for the active context when available.
+  Future<BackendPerfContextData?> getPerformanceContext() {
+    final candidate = backend;
+    final contextHandle = _contextHandle;
+    if (contextHandle == null) {
+      return Future<BackendPerfContextData?>.value(null);
+    }
+    if (candidate is BackendPerformanceDiagnostics) {
+      return (candidate as BackendPerformanceDiagnostics).getPerformanceContext(
+        contextHandle,
+      );
+    }
+    return Future<BackendPerfContextData?>.value(null);
   }
 
   /// Returns true if the current hardware and backend support GPU acceleration.

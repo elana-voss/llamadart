@@ -18,6 +18,7 @@ class NativeLlamaBackend
         LlamaBackend,
         BackendAvailability,
         BackendRuntimeDiagnostics,
+        BackendPerformanceDiagnostics,
         BackendEmbeddings,
         BackendBatchEmbeddings {
   Isolate? _isolate;
@@ -378,6 +379,33 @@ class NativeLlamaBackend
     final res = await rp.first;
     rp.close();
     return (res as ResolvedGpuLayersResponse).layers;
+  }
+
+  @override
+  Future<BackendPerfContextData?> getPerformanceContext(
+    int contextHandle,
+  ) async {
+    await _ensureIsolate();
+    final rp = ReceivePort();
+    _sendPort!.send(PerformanceContextRequest(contextHandle, rp.sendPort));
+    final res = await rp.first;
+    rp.close();
+    if (res is PerformanceContextResponse) {
+      return BackendPerfContextData(
+        loadMs: res.loadMs,
+        promptEvalMs: res.promptEvalMs,
+        evalMs: res.evalMs,
+        sampleMs: res.sampleMs,
+        promptEvalTokens: res.promptEvalTokens,
+        evalTokens: res.evalTokens,
+        sampleCount: res.sampleCount,
+        reusedGraphs: res.reusedGraphs,
+      );
+    }
+    if (res is ErrorResponse) {
+      throw Exception(res.message);
+    }
+    return null;
   }
 
   @override
