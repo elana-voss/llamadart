@@ -153,6 +153,28 @@ void main() {
       );
     });
 
+    test('keeps malformed completed tool section as content', () {
+      const output =
+          '<|tool_calls_section_begin|><|tool_call_begin|>functions.weather:0<|tool_call_argument_begin|>{"city":"Seoul"<|tool_calls_section_end|>';
+
+      final result = ChatTemplateEngine.parse(ChatFormat.kimiK2.index, output);
+
+      expect(result.toolCalls, isEmpty);
+      expect(result.content, equals(output));
+    });
+
+    test('keeps entire scope as content when later tool call is malformed', () {
+      const output =
+          '<|tool_calls_section_begin|>'
+          '<|tool_call_begin|>functions.read_file:0<|tool_call_argument_begin|>{"path":"a.txt"}<|tool_call_end|>'
+          '<|tool_call_begin|>functions.weather:1<|tool_call_argument_begin|>{"city":"Seoul"<|tool_calls_section_end|>';
+
+      final result = ChatTemplateEngine.parse(ChatFormat.kimiK2.index, output);
+
+      expect(result.toolCalls, isEmpty);
+      expect(result.content, equals(output));
+    });
+
     test('renders tool grammar for Kimi-K2 tool calls', () {
       final handler = KimiK2Handler();
       final tools = [

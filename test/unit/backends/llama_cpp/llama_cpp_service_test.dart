@@ -260,6 +260,111 @@ void main() {
     });
   });
 
+  group('shouldUseConservativeAndroidVulkanContextConfig', () {
+    test('returns false off Android', () {
+      const params = ModelParams(
+        gpuLayers: 16,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(params),
+        isFalse,
+      );
+    });
+
+    test('returns true for Android Vulkan with GPU layers', () {
+      const params = ModelParams(
+        gpuLayers: 16,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(
+          params,
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('returns false for Android CPU mode', () {
+      const params = ModelParams(
+        gpuLayers: 0,
+        preferredBackend: GpuBackend.cpu,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(
+          params,
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('returns false after effective Vulkan fallback to zero layers', () {
+      const params = ModelParams(
+        gpuLayers: 16,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.shouldUseConservativeAndroidVulkanContextConfig(
+          params,
+          resolvedGpuLayers: 0,
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+  });
+
+  group('shouldEnableExperimentalAndroidVulkanAcceleration', () {
+    test('returns false off Android', () {
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          'Qwen3.5-0.8B-Q4_K_M.gguf',
+        ),
+        isFalse,
+      );
+    });
+
+    test('returns true for small Qwen3.5 models on Android', () {
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Qwen3.5-0.8B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Qwen3.5-2B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Qwen3.5-4B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
+      );
+    });
+
+    test('returns false for unrelated models on Android', () {
+      expect(
+        LlamaCppService.shouldEnableExperimentalAndroidVulkanAcceleration(
+          '/data/user/0/app_flutter/models/Llama-3.2-3B.gguf',
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+  });
+
   group('resolveMtmdUseGpuForLoad', () {
     test('forces CPU mode to disable projector GPU offload', () {
       const params = ModelParams(
@@ -338,6 +443,40 @@ void main() {
       expect(
         LlamaCppService.parseBackendModuleDirectoryFromProcMaps(maps),
         isNull,
+      );
+    });
+
+    test('forces CPU projector mode for Android Qwen3.5 0.8B', () {
+      const params = ModelParams(
+        gpuLayers: ModelParams.maxGpuLayers,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.resolveMtmdUseGpuForLoad(
+          params,
+          ModelParams.maxGpuLayers,
+          modelPath: '/data/user/0/app/models/Qwen3.5-0.8B-Q4_K_M.gguf',
+          isAndroid: true,
+        ),
+        isFalse,
+      );
+    });
+
+    test('keeps projector GPU path for unrelated Android models', () {
+      const params = ModelParams(
+        gpuLayers: ModelParams.maxGpuLayers,
+        preferredBackend: GpuBackend.vulkan,
+      );
+
+      expect(
+        LlamaCppService.resolveMtmdUseGpuForLoad(
+          params,
+          ModelParams.maxGpuLayers,
+          modelPath: '/data/user/0/app/models/Llama-3.2-3B.gguf',
+          isAndroid: true,
+        ),
+        isTrue,
       );
     });
   });
@@ -461,6 +600,115 @@ void main() {
         expect(path.normalize(resolved!), path.normalize(exeDir.path));
       },
     );
+  });
+
+  group('Linux runtime dependency helpers', () {
+    late Directory tempRoot;
+
+    setUp(() {
+      tempRoot = Directory.systemTemp.createTempSync(
+        'llamadart-linux-runtime-helpers-',
+      );
+    });
+
+    tearDown(() {
+      if (tempRoot.existsSync()) {
+        tempRoot.deleteSync(recursive: true);
+      }
+    });
+
+    test('copyMissingLinuxLibrary copies from the first available source', () {
+      final targetDir = Directory(path.join(tempRoot.path, 'target'))
+        ..createSync(recursive: true);
+      final sourceA = Directory(path.join(tempRoot.path, 'source-a'))
+        ..createSync(recursive: true);
+      final sourceB = Directory(path.join(tempRoot.path, 'source-b'))
+        ..createSync(recursive: true);
+      File(path.join(sourceB.path, 'libggml.so')).writeAsStringSync('ggml');
+
+      final diagnostics = <String>[];
+      final copied = LlamaCppService.copyMissingLinuxLibrary(
+        targetDirectory: targetDir.path,
+        sourceDirectories: <String>[sourceA.path, sourceB.path],
+        fileName: 'libggml.so',
+        onDiagnostic: diagnostics.add,
+      );
+
+      expect(copied, isTrue);
+      expect(
+        File(path.join(targetDir.path, 'libggml.so')).readAsStringSync(),
+        'ggml',
+      );
+      expect(diagnostics, isEmpty);
+    });
+
+    test('copyMissingLinuxLibrary reports copy failures', () {
+      final targetDir = Directory(path.join(tempRoot.path, 'target'))
+        ..createSync(recursive: true);
+      Directory(path.join(targetDir.path, 'libggml.so')).createSync();
+      final sourceDir = Directory(path.join(tempRoot.path, 'source'))
+        ..createSync(recursive: true);
+      File(path.join(sourceDir.path, 'libggml.so')).writeAsStringSync('ggml');
+
+      final diagnostics = <String>[];
+      final copied = LlamaCppService.copyMissingLinuxLibrary(
+        targetDirectory: targetDir.path,
+        sourceDirectories: <String>[sourceDir.path],
+        fileName: 'libggml.so',
+        onDiagnostic: diagnostics.add,
+      );
+
+      expect(copied, isFalse);
+      expect(diagnostics, hasLength(1));
+      expect(
+        diagnostics.single,
+        contains('Failed to copy Linux runtime dependency'),
+      );
+    });
+
+    test('ensureLinuxSonameAlias creates fallback alias when missing', () {
+      final targetDir = Directory(path.join(tempRoot.path, 'target'))
+        ..createSync(recursive: true);
+      final sourcePath = path.join(targetDir.path, 'libllama.so');
+      File(sourcePath).writeAsStringSync('llama');
+
+      final diagnostics = <String>[];
+      final created = LlamaCppService.ensureLinuxSonameAlias(
+        directory: targetDir.path,
+        baseFileName: 'libllama.so',
+        onDiagnostic: diagnostics.add,
+      );
+
+      expect(created, isTrue);
+      expect(
+        File('$sourcePath.0').existsSync() ||
+            Link('$sourcePath.0').existsSync(),
+        isTrue,
+      );
+      expect(diagnostics, isEmpty);
+    });
+
+    test('ensureLinuxSonameAlias reports alias creation failures', () {
+      final targetDir = Directory(path.join(tempRoot.path, 'target'))
+        ..createSync(recursive: true);
+      final sourcePath = path.join(targetDir.path, 'libllama.so');
+      File(sourcePath).writeAsStringSync('llama');
+      Directory('$sourcePath.0').createSync();
+
+      final diagnostics = <String>[];
+      final created = LlamaCppService.ensureLinuxSonameAlias(
+        directory: targetDir.path,
+        baseFileName: 'libllama.so',
+        onDiagnostic: diagnostics.add,
+      );
+
+      expect(created, isFalse);
+      expect(diagnostics, hasLength(1));
+      expect(
+        diagnostics.single,
+        contains('Failed to create or copy Linux SONAME alias'),
+      );
+    });
   });
 
   test('resolveBackendModuleDirectory returns null on unsupported hosts', () {

@@ -48,3 +48,11 @@ final supportsAudio = await engine.supportsAudio;
 - Multimodal projector loading on web is URL-based.
 - Local file path media inputs are native-first; web flows use browser file
   bytes/URLs.
+
+## Tuning notes
+
+- Start with smaller images or audio inputs before changing backend settings.
+- Keep context and generation budgets tighter than your text-only defaults.
+- If multimodal is unstable on GPU, establish a working CPU baseline first.
+- For broader tuning workflow and diagnostics guidance, see
+  [Performance Tuning](./performance-tuning).

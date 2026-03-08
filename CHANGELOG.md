@@ -1,3 +1,16 @@
+## Unreleased
+
+* **Runtime syncs**:
+  * Updated native hook pinning to `leehack/llamadart-native@b8216`.
+  * Updated default web bridge asset pinning to `leehack/llama-web-bridge-assets@v0.1.10` (llama.cpp `b8216`).
+* **Qwen3.5 runtime stabilization (Android + Web)**:
+  * Switched bundled Qwen3.5 presets to Unsloth `Q4_K_M` GGUFs across the example catalog and tooling.
+  * Added Android-native perf diagnostics chips (`p_eval`, `eval`, `sample`, `reuse`) backed by llama.cpp context timings with manual timing fallback when built-in counters report zero.
+  * Restored a targeted Android Vulkan fast path for local Qwen3.5 `0.8B` / `2B` / `4B` models by re-enabling KQV/op-offload/flash-attention where stable.
+  * Updated Android chat app defaults to prefer CPU for Qwen3.5 `0.8B` and `2B`, and reduced Android `0.8B` context to `2048` for lower first-token latency.
+  * Hardened Android multimodal handling by downscaling staged images in the chat app and forcing Qwen3.5 `0.8B` projector work onto CPU on Android.
+  * Fixed WebGPU Qwen prompt/control-token handling and committed companion bridge-side streaming/multimodal fixes required by the local chat app runtime.
+
 ## 0.6.5
 
 * **Embedding API (native backend capability)**:

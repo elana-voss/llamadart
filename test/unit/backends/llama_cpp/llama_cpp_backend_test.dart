@@ -1,6 +1,7 @@
 @TestOn('vm')
 library;
 
+import 'dart:async';
 import 'dart:isolate';
 
 import 'package:llamadart/src/backends/backend.dart';
@@ -23,11 +24,11 @@ void main() {
 
   group('NativeLlamaBackend request routing', () {
     late _FakeWorkerHarness harness;
-    late NativeLlamaBackend backend;
+    late _TrackingNativeLlamaBackend backend;
 
     setUp(() {
       harness = _FakeWorkerHarness();
-      backend = NativeLlamaBackend(initialSendPort: harness.sendPort);
+      backend = _TrackingNativeLlamaBackend(initialSendPort: harness.sendPort);
     });
 
     tearDown(() async {
@@ -125,6 +126,20 @@ void main() {
       );
     });
 
+    test(
+      'canceling a generation subscription triggers backend cancelation',
+      () async {
+        final subscription = backend
+            .generate(1, 'pending', const GenerationParams())
+            .listen((_) {});
+
+        await Future<void>.delayed(Duration.zero);
+        await subscription.cancel();
+
+        expect(backend.cancelGenerationCalled, isTrue);
+      },
+    );
+
     test('diagnostic and multimodal endpoints route correctly', () async {
       expect(await backend.getBackendName(), 'CPU');
       expect(await backend.getAvailableBackends(), 'CPU, METAL');
@@ -192,6 +207,18 @@ void main() {
   });
 }
 
+class _TrackingNativeLlamaBackend extends NativeLlamaBackend {
+  _TrackingNativeLlamaBackend({super.initialSendPort});
+
+  bool cancelGenerationCalled = false;
+
+  @override
+  void cancelGeneration() {
+    cancelGenerationCalled = true;
+    super.cancelGeneration();
+  }
+}
+
 class _FakeWorkerHarness {
   final ReceivePort _port = ReceivePort();
   final List<Object> received = <Object>[];
@@ -249,6 +276,8 @@ class _FakeWorkerHarness {
         case GenerateRequest():
           if (message.prompt == 'boom') {
             message.sendPort.send(ErrorResponse('generation failed'));
+          } else if (message.prompt == 'pending') {
+            // Hold open until the client cancels the stream.
           } else {
             message.sendPort.send(TokenResponse(<int>[65]));
             message.sendPort.send(TokenResponse(<int>[66]));

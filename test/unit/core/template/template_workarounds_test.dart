@@ -27,6 +27,48 @@ void main() {
       expect(args, equals({'city': 'Seoul'}));
     });
 
+    test('normalizeToolCallArgs supports dynamic map values', () {
+      final messages = [
+        <String, dynamic>{
+          'role': 'assistant',
+          'tool_calls': [
+            {
+              'type': 'function',
+              'function': {
+                'name': 'weather',
+                'arguments': <Object, Object>{'city': 'Seoul', 7: true},
+              },
+            },
+          ],
+        },
+      ];
+
+      TemplateWorkarounds.normalizeToolCallArgs(messages);
+
+      final args =
+          (messages.first['tool_calls'] as List).first['function']['arguments'];
+      expect(args, equals({'city': 'Seoul', '7': true}));
+    });
+
+    test('normalizeToolCallArgs rejects non-object JSON arguments', () {
+      final messages = [
+        <String, dynamic>{
+          'role': 'assistant',
+          'tool_calls': [
+            {
+              'type': 'function',
+              'function': {'name': 'weather', 'arguments': '[1,2,3]'},
+            },
+          ],
+        },
+      ];
+
+      expect(
+        () => TemplateWorkarounds.normalizeToolCallArgs(messages),
+        throwsFormatException,
+      );
+    });
+
     test('useGenericSchema converts OpenAI tool call shape', () {
       final messages = [
         <String, dynamic>{

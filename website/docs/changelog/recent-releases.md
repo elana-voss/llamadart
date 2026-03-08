@@ -8,7 +8,17 @@ For canonical full release notes, use:
 
 ## Unreleased
 
-- No entries yet.
+- Synced native hook pin to `leehack/llamadart-native@b8216`.
+- Updated default web bridge asset pinning to
+  `leehack/llama-web-bridge-assets@v0.1.10` (llama.cpp `b8216`).
+- Switched bundled Qwen3.5 example presets to Unsloth `Q4_K_M` GGUFs.
+- Added native perf diagnostics chips in the chat app (`p_eval`, `eval`,
+  `sample`, `reuse`) and Android-specific Qwen tuning guidance.
+- Restored a targeted Android Vulkan fast path for local Qwen3.5 `0.8B` / `2B`
+  / `4B` models while keeping CPU as the recommended Android preset for
+  `0.8B` / `2B`.
+- Fixed local web chat app bridge/runtime handling for Qwen prompt streaming and
+  multimodal fallback behavior.
 
 ## 0.6.5
 

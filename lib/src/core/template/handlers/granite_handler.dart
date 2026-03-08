@@ -1,10 +1,7 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
 import '../../models/chat/chat_template_result.dart';
-import '../../models/chat/completion_chunk.dart';
 import '../../models/inference/tool_choice.dart';
 import '../../models/tools/tool_definition.dart';
 import '../chat_format.dart';
@@ -12,6 +9,7 @@ import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../template_internal_metadata.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 import '../tool_call_grammar_utils.dart';
 
 /// Handler for IBM Granite models.
@@ -139,7 +137,10 @@ class GraniteHandler extends ChatTemplateHandler {
         payload.codeUnitAt(payloadOffset) <= 0x20) {
       payloadOffset++;
     }
-    final jsonSlice = _extractLeadingJsonValue(payload, payloadOffset);
+    final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(
+      payload,
+      payloadOffset,
+    );
     if (jsonSlice == null || jsonSlice.value is! List) {
       return ChatParseResult(
         content: text.trim(),
@@ -155,38 +156,14 @@ class GraniteHandler extends ChatTemplateHandler {
       );
     }
 
-    final toolCalls = <LlamaCompletionChunkToolCall>[];
-    for (final item in jsonSlice.value as List<dynamic>) {
-      if (item is! Map) {
-        return ChatParseResult(
-          content: text.trim(),
-          reasoningContent: thinking.reasoning,
-        );
-      }
-      final map = Map<String, dynamic>.from(item);
-      final name = map['name'] as String?;
-      if (name == null || name.isEmpty) {
-        return ChatParseResult(
-          content: text.trim(),
-          reasoningContent: thinking.reasoning,
-        );
-      }
-
-      final args = map['arguments'];
-      final arguments = args is String
-          ? args
-          : (map.containsKey('arguments') ? jsonEncode(args) : '');
-      final id = map['id']?.toString();
-      toolCalls.add(
-        LlamaCompletionChunkToolCall(
-          index: toolCalls.length,
-          id: (id == null || id.isEmpty) ? null : id,
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: arguments,
-          ),
-        ),
+    final toolCalls = ToolCallParsingUtils.parseToolCallArray(
+      jsonSlice.value,
+      assignFallbackIds: false,
+    );
+    if (toolCalls == null) {
+      return ChatParseResult(
+        content: text.trim(),
+        reasoningContent: thinking.reasoning,
       );
     }
 
@@ -195,100 +172,6 @@ class GraniteHandler extends ChatTemplateHandler {
       reasoningContent: thinking.reasoning,
       toolCalls: toolCalls,
     );
-  }
-
-  _JsonValueSlice? _extractLeadingJsonValue(String input, int offset) {
-    if (offset >= input.length) {
-      return null;
-    }
-
-    int? end;
-    final first = input.codeUnitAt(offset);
-    if (first == 0x7B || first == 0x5B) {
-      end = _findStructuredJsonEnd(input, offset);
-    } else if (first == 0x22) {
-      end = _findJsonStringEnd(input, offset);
-    } else {
-      final scalar = RegExp(
-        r'(?:-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?|true|false|null)',
-      ).matchAsPrefix(input, offset);
-      if (scalar != null) {
-        end = scalar.end;
-      }
-    }
-
-    if (end == null || end <= offset) {
-      return null;
-    }
-
-    try {
-      return _JsonValueSlice(
-        value: jsonDecode(input.substring(offset, end)),
-        end: end,
-      );
-    } catch (_) {
-      return null;
-    }
-  }
-
-  int? _findStructuredJsonEnd(String input, int start) {
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = start; i < input.length; i++) {
-      final ch = input.codeUnitAt(i);
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (ch == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (ch == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (ch == 0x22) {
-        inString = true;
-        continue;
-      }
-      if (ch == 0x7B || ch == 0x5B) {
-        depth++;
-        continue;
-      }
-      if (ch == 0x7D || ch == 0x5D) {
-        depth--;
-        if (depth == 0) {
-          return i + 1;
-        }
-      }
-    }
-
-    return null;
-  }
-
-  int? _findJsonStringEnd(String input, int start) {
-    var escaped = false;
-    for (var i = start + 1; i < input.length; i++) {
-      final ch = input.codeUnitAt(i);
-      if (escaped) {
-        escaped = false;
-        continue;
-      }
-      if (ch == 0x5C) {
-        escaped = true;
-        continue;
-      }
-      if (ch == 0x22) {
-        return i + 1;
-      }
-    }
-    return null;
   }
 
   @override
@@ -347,11 +230,4 @@ response-body ::= [^<]*
 space ::= "" | " " | "\\n"{1,2} [ \\t]{0,20}
 ''';
   }
-}
-
-final class _JsonValueSlice {
-  final Object? value;
-  final int end;
-
-  const _JsonValueSlice({required this.value, required this.end});
 }

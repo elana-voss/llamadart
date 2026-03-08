@@ -221,7 +221,7 @@ example/
 ### Web Notes
 
 - Web examples run on the llama.cpp bridge backend (WebGPU or CPU mode).
-- `chat_app` loader is local-first and falls back to jsDelivr bridge assets.
+- `chat_app` loader prefers local bridge assets on localhost, and otherwise prefers CDN with local fallback.
 - You can prefetch a pinned bridge version into `web/webgpu_bridge/` with:
   `WEBGPU_BRIDGE_ASSETS_TAG=<tag> ./scripts/fetch_webgpu_bridge_assets.sh`.
 - Fetch script defaults to universal Safari-compatible patching:

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
@@ -13,6 +11,7 @@ import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../template_internal_metadata.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Functionary v3.1 Llama 3.1 templates.
 ///
@@ -114,14 +113,10 @@ class FunctionaryV31Llama31Handler extends ChatTemplateHandler {
       }
 
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: toolCalls.length,
-          id: 'call_${toolCalls.length}',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: _normalizeArguments(body),
-          ),
+          name: name,
+          arguments: _normalizeArguments(body),
         ),
       );
       text = text.replaceAll(match.group(0)!, '');
@@ -133,14 +128,10 @@ class FunctionaryV31Llama31Handler extends ChatTemplateHandler {
       final code = text.substring(pythonIdx + _pythonTag.length).trim();
       if (code.isNotEmpty) {
         toolCalls.add(
-          LlamaCompletionChunkToolCall(
+          ToolCallParsingUtils.createFunctionToolCall(
             index: toolCalls.length,
-            id: 'call_${toolCalls.length}',
-            type: 'function',
-            function: LlamaCompletionChunkFunction(
-              name: 'python',
-              arguments: jsonEncode({'code': code}),
-            ),
+            name: 'python',
+            arguments: <String, dynamic>{'code': code},
           ),
         );
       }
@@ -156,14 +147,10 @@ class FunctionaryV31Llama31Handler extends ChatTemplateHandler {
           final args = text.substring(nameEnd + 1).trim();
           if (name.isNotEmpty && args.isNotEmpty) {
             toolCalls.add(
-              LlamaCompletionChunkToolCall(
+              ToolCallParsingUtils.createFunctionToolCall(
                 index: toolCalls.length,
-                id: 'call_${toolCalls.length}',
-                type: 'function',
-                function: LlamaCompletionChunkFunction(
-                  name: name,
-                  arguments: args,
-                ),
+                name: name,
+                arguments: args,
               ),
             );
             text = text.substring(0, openIdx);
@@ -176,19 +163,11 @@ class FunctionaryV31Llama31Handler extends ChatTemplateHandler {
   }
 
   String _normalizeArguments(String body) {
-    if (body.isEmpty) {
-      return '{}';
-    }
-
-    try {
-      final decoded = jsonDecode(body);
-      if (decoded is Map) {
-        return jsonEncode(Map<String, dynamic>.from(decoded));
-      }
-      return jsonEncode({'value': decoded});
-    } catch (_) {
-      return body;
-    }
+    return ToolCallParsingUtils.normalizeJsonArguments(
+      body,
+      wrapScalarsAsValue: true,
+      emptyFallback: '{}',
+    );
   }
 
   @override

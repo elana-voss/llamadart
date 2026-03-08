@@ -10,6 +10,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// The built-in ChatML template used as fallback when the model has none.
 const String _chatMlTemplate = '''
@@ -116,7 +117,7 @@ class GenericHandler extends ChatTemplateHandler {
     }
 
     final trimmed = text.trim();
-    final decoded = _decodeJsonObject(trimmed);
+    final decoded = ToolCallParsingUtils.decodeJsonObject(trimmed);
     if (decoded == null) {
       if (isPartial) {
         final partial = _parsePartialEnvelope(trimmed);
@@ -188,46 +189,15 @@ class GenericHandler extends ChatTemplateHandler {
     );
   }
 
-  Map<String, dynamic>? _decodeJsonObject(String text) {
-    if (text.isEmpty) {
-      return null;
-    }
-
-    try {
-      final decoded = jsonDecode(text);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
-    } catch (_) {
-      return null;
-    }
-
-    return null;
-  }
-
   List<LlamaCompletionChunkToolCall>? _extractToolCalls(Object? value) {
-    if (value is! List) {
-      return null;
-    }
-    final calls = <LlamaCompletionChunkToolCall>[];
-    for (var i = 0; i < value.length; i++) {
-      final toolCall = _toToolCall(value[i], i);
-      if (toolCall == null) {
-        return null;
-      }
-      calls.add(toolCall);
-    }
-    return calls;
+    return ToolCallParsingUtils.parseToolCallArray(value);
   }
 
   LlamaCompletionChunkToolCall? _toToolCall(Object? value, int index) {
-    if (value is! Map) {
+    final map = ToolCallParsingUtils.coerceMap(value);
+    if (map == null) {
       return null;
     }
-    final map = Map<String, dynamic>.from(value);
 
     final rawName = map['name'];
     if (rawName is! String || rawName.isEmpty) {
@@ -237,26 +207,26 @@ class GenericHandler extends ChatTemplateHandler {
     final rawId = map['id'];
     final id = rawId is String && rawId.isNotEmpty ? rawId : null;
 
-    var encodedArguments = '';
-    if (map.containsKey('arguments')) {
-      final arguments = map['arguments'];
-      if (arguments == null) {
-        encodedArguments = '';
-      } else {
-        encodedArguments = arguments is String
-            ? arguments
-            : jsonEncode(arguments);
-      }
-    }
-
-    return LlamaCompletionChunkToolCall(
+    return ToolCallParsingUtils.createFunctionToolCall(
       index: index,
-      id: id ?? 'call_$index',
-      type: 'function',
-      function: LlamaCompletionChunkFunction(
-        name: rawName,
-        arguments: encodedArguments,
-      ),
+      name: rawName,
+      id: id,
+      arguments: map.containsKey('arguments') ? map['arguments'] : null,
+    );
+  }
+
+  LlamaCompletionChunkToolCall _createPartialToolCall({
+    required int index,
+    required String name,
+    String? id,
+    Object? arguments,
+  }) {
+    return ToolCallParsingUtils.createFunctionToolCall(
+      index: index,
+      name: name,
+      id: id,
+      arguments: arguments,
+      assignFallbackId: false,
     );
   }
 
@@ -298,14 +268,11 @@ class GenericHandler extends ChatTemplateHandler {
     final id = _extractTopLevelStringField(body, 'id');
     final rawArguments = _extractPartialArguments(body);
 
-    return LlamaCompletionChunkToolCall(
+    return _createPartialToolCall(
       index: 0,
-      id: (id == null || id.isEmpty) ? null : id,
-      type: 'function',
-      function: LlamaCompletionChunkFunction(
-        name: name,
-        arguments: rawArguments,
-      ),
+      name: name,
+      id: id,
+      arguments: rawArguments,
     );
   }
 
@@ -329,14 +296,11 @@ class GenericHandler extends ChatTemplateHandler {
       final rawArguments = _extractPartialArguments(callBody);
 
       calls.add(
-        LlamaCompletionChunkToolCall(
+        _createPartialToolCall(
           index: calls.length,
-          id: (id == null || id.isEmpty) ? null : id,
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: name,
-            arguments: rawArguments,
-          ),
+          name: name,
+          id: id,
+          arguments: rawArguments,
         ),
       );
     }

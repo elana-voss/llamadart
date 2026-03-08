@@ -7,6 +7,9 @@ Runtime behavior is primarily controlled by:
 - `ModelParams` at model load time.
 - `GenerationParams` per generation call.
 
+For a strategy-focused walkthrough on how to change these knobs and what to
+measure, see [Performance Tuning](../guides/performance-tuning).
+
 ## ModelParams essentials
 
 ```dart

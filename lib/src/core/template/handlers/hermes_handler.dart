@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
@@ -10,6 +8,7 @@ import '../chat_format.dart';
 import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Hermes 2 Pro / Qwen 2.5 / Qwen 3 format.
 ///
@@ -130,13 +129,12 @@ class HermesHandler extends ChatTemplateHandler {
           break;
         }
         final jsonStart = match.start + startOffset;
-        final jsonRange = _extractJsonObject(text, jsonStart);
+        final jsonRange = _extractJsonObjectRange(text, jsonStart);
         if (jsonRange == null) {
           parseFailed = true;
           break;
         }
-        final jsonValue = _decodeJsonObject(jsonRange.json);
-        final toolCall = _toNamedToolCall(jsonValue, toolCalls.length);
+        final toolCall = _toNamedToolCall(jsonRange.value, toolCalls.length);
         if (toolCall == null) {
           parseFailed = true;
           break;
@@ -167,19 +165,17 @@ class HermesHandler extends ChatTemplateHandler {
         continue;
       }
 
-      final jsonRange = _extractJsonObject(text, match.end);
+      final jsonRange = _extractJsonObjectRange(text, match.end);
       if (jsonRange == null) {
         parseFailed = true;
         break;
       }
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: toolCalls.length,
-          id: 'call_${toolCalls.length}',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: functionName,
-            arguments: _normalizeArguments(jsonRange.json),
+          name: functionName,
+          arguments: _normalizeArguments(
+            text.substring(match.end, jsonRange.end),
           ),
         ),
       );
@@ -253,109 +249,37 @@ class HermesHandler extends ChatTemplateHandler {
     return matches.first;
   }
 
-  _JsonRange? _extractJsonObject(String text, int start) {
-    if (start >= text.length || text.codeUnitAt(start) != 0x7B) {
+  ParsedJsonValueSlice? _extractJsonObjectRange(String text, int start) {
+    final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(text, start);
+    if (jsonSlice == null || jsonSlice.value is! Map) {
       return null;
     }
-
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = start; i < text.length; i++) {
-      final codeUnit = text.codeUnitAt(i);
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (codeUnit == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (codeUnit == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (codeUnit == 0x22) {
-        inString = true;
-        continue;
-      }
-
-      if (codeUnit == 0x7B) {
-        depth++;
-        continue;
-      }
-      if (codeUnit == 0x7D) {
-        depth--;
-        if (depth == 0) {
-          return _JsonRange(json: text.substring(start, i + 1), end: i + 1);
-        }
-      }
-    }
-    return null;
+    return jsonSlice;
   }
 
-  Map<String, dynamic>? _decodeJsonObject(String jsonText) {
-    try {
-      final decoded = jsonDecode(jsonText);
-      if (decoded is Map<String, dynamic>) {
-        return decoded;
-      }
-      if (decoded is Map) {
-        return Map<String, dynamic>.from(decoded);
-      }
-    } catch (_) {
+  LlamaCompletionChunkToolCall? _toNamedToolCall(Object? jsonValue, int index) {
+    final map = ToolCallParsingUtils.coerceMap(jsonValue);
+    if (map == null) {
       return null;
     }
-    return null;
-  }
-
-  LlamaCompletionChunkToolCall? _toNamedToolCall(
-    Map<String, dynamic>? jsonValue,
-    int index,
-  ) {
-    if (jsonValue == null) {
-      return null;
-    }
-    final name = jsonValue['name'];
+    final name = map['name'];
     if (name is! String || name.isEmpty) {
       return null;
     }
 
-    final rawId = jsonValue['id'];
+    final rawId = map['id'];
     final id = rawId is String && rawId.isNotEmpty ? rawId : 'call_$index';
 
-    var arguments = '';
-    if (jsonValue.containsKey('arguments')) {
-      final rawArguments = jsonValue['arguments'];
-      if (rawArguments == null) {
-        arguments = '';
-      } else {
-        arguments = rawArguments is String
-            ? rawArguments
-            : jsonEncode(rawArguments);
-      }
-    }
-
-    return LlamaCompletionChunkToolCall(
+    return ToolCallParsingUtils.createFunctionToolCall(
       index: index,
+      name: name,
       id: id,
-      type: 'function',
-      function: LlamaCompletionChunkFunction(name: name, arguments: arguments),
+      arguments: map.containsKey('arguments') ? map['arguments'] : null,
     );
   }
 
   String _normalizeArguments(String jsonText) {
-    try {
-      final decoded = jsonDecode(jsonText);
-      return jsonEncode(decoded);
-    } catch (_) {
-      return jsonText;
-    }
+    return ToolCallParsingUtils.normalizeJsonArguments(jsonText);
   }
 
   int _consumeWhitespaces(String text, int start) {
@@ -422,11 +346,4 @@ value ::= string | number | boolean | null | arr | obj
 arr ::= "[" space (value ("," space value)*)? space "]"
 obj ::= "{" space (string ":" space value ("," space string ":" space value)*)? space "}"''';
   }
-}
-
-final class _JsonRange {
-  final String json;
-  final int end;
-
-  const _JsonRange({required this.json, required this.end});
 }

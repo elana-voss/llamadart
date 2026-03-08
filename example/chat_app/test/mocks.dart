@@ -107,6 +107,12 @@ class MockLlamaBackend implements LlamaBackend, BackendAvailability {
 
 class MockLlamaEngine extends LlamaEngine {
   bool initialized = false;
+  bool mmprojLoaded = false;
+  int loadMultimodalProjectorCalls = 0;
+  int unloadMultimodalProjectorCalls = 0;
+  ModelParams? lastModelParams;
+  String? lastLoadedModelPath;
+  String? lastLoadedModelUrl;
 
   MockLlamaEngine() : super(MockLlamaBackend());
 
@@ -118,6 +124,8 @@ class MockLlamaEngine extends LlamaEngine {
     String path, {
     ModelParams modelParams = const ModelParams(),
   }) async {
+    lastLoadedModelPath = path;
+    lastModelParams = modelParams;
     initialized = true;
   }
 
@@ -127,8 +135,28 @@ class MockLlamaEngine extends LlamaEngine {
     ModelParams modelParams = const ModelParams(),
     Function(double progress)? onProgress,
   }) async {
+    lastLoadedModelUrl = url;
+    lastModelParams = modelParams;
     initialized = true;
   }
+
+  @override
+  Future<void> loadMultimodalProjector(String mmProjPath) async {
+    loadMultimodalProjectorCalls += 1;
+    mmprojLoaded = true;
+  }
+
+  @override
+  Future<void> unloadMultimodalProjector() async {
+    unloadMultimodalProjectorCalls += 1;
+    mmprojLoaded = false;
+  }
+
+  @override
+  Future<bool> get supportsVision async => mmprojLoaded;
+
+  @override
+  Future<bool> get supportsAudio async => false;
 
   @override
   Future<LlamaChatTemplateResult> chatTemplate(
@@ -220,6 +248,11 @@ class MockChatService extends ChatService {
       throw Exception("Invalid model path");
     }
     await mockEngine.loadModel(settings.modelPath!);
+    if (eagerLoadMultimodalProjector &&
+        settings.mmprojPath != null &&
+        settings.mmprojPath!.isNotEmpty) {
+      await mockEngine.loadMultimodalProjector(settings.mmprojPath!);
+    }
   }
 
   @override

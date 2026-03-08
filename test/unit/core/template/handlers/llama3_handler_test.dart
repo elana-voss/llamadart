@@ -144,6 +144,22 @@ void main() {
       ),
     );
   });
+
+  test('parses builtin python tag calls into tool chunks', () {
+    final handler = Llama3Handler();
+
+    final parsed = handler.parse(
+      '<|python_tag|>math.call(code="print(1)", retries=2)',
+    );
+
+    expect(parsed.content, isEmpty);
+    expect(parsed.toolCalls, hasLength(1));
+    expect(parsed.toolCalls.first.function?.name, equals('math'));
+    expect(
+      jsonDecode(parsed.toolCalls.first.function!.arguments!),
+      equals({'code': 'print(1)', 'retries': 2}),
+    );
+  });
 }
 
 Future<Object?> _noopHandler(_) async {

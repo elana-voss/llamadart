@@ -12,15 +12,16 @@ Web mode uses an external JavaScript bridge runtime consumed by `llamadart`.
 
 ## Runtime load order
 
-`example/chat_app/web/index.html` follows local-first loading:
+`example/chat_app/web/index.html` uses local-first loading on localhost for
+development validation, and CDN-first loading for normal hosted deployments:
 
-1. Local asset (generated via fetch script): `./webgpu_bridge/llama_webgpu_bridge.js`
-2. CDN fallback (jsDelivr)
+1. On localhost: local asset first, then CDN fallback
+2. On hosted deployments: CDN asset first, then local fallback
 
 Fetch pinned local assets with:
 
 ```bash
-WEBGPU_BRIDGE_ASSETS_TAG=v0.1.8 ./scripts/fetch_webgpu_bridge_assets.sh
+WEBGPU_BRIDGE_ASSETS_TAG=v0.1.10 ./scripts/fetch_webgpu_bridge_assets.sh
 ```
 
 ## Compatibility and safeguards
@@ -44,7 +45,7 @@ You can override bridge asset source/version before loader startup:
 ```html
 <script>
   window.__llamadartBridgeAssetsRepo = 'leehack/llama-web-bridge-assets';
-  window.__llamadartBridgeAssetsTag = 'v0.1.8';
+  window.__llamadartBridgeAssetsTag = 'v0.1.10';
   // Optional knobs:
   // window.__llamadartBridgeEnableMem64 = false;
   // window.__llamadartBridgeAllowAutoRemoteFetchBackend = false;

@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+
 import '../../backends/backend.dart';
 import '../template/chat_template_engine.dart';
 import '../exceptions.dart';
@@ -130,7 +131,7 @@ class LlamaEngine {
     String path, {
     ModelParams modelParams = const ModelParams(),
   }) async {
-    final modelName = path.split('/').last;
+    final modelName = _displayNameForSource(path);
     LlamaLogger.instance.info('Loading model: $modelName');
 
     if (backend.supportsUrlLoading) {
@@ -152,6 +153,7 @@ class LlamaEngine {
         'Model $modelName loaded successfully from $path',
       );
     } catch (e, stackTrace) {
+      await _cleanupFailedLoadState();
       LlamaLogger.instance.error(
         'Failed to load model $modelName from $path',
         e,
@@ -170,7 +172,7 @@ class LlamaEngine {
     ModelParams modelParams = const ModelParams(),
     Function(double progress)? onProgress,
   }) async {
-    final modelName = url.split('/').last;
+    final modelName = _displayNameForSource(url);
     LlamaLogger.instance.info('Loading model from URL: $modelName');
 
     if (!backend.supportsUrlLoading) {
@@ -197,21 +199,7 @@ class LlamaEngine {
         'Model $modelName loaded successfully from $url',
       );
     } catch (e, stackTrace) {
-      if (_contextHandle != null) {
-        try {
-          await backend.contextFree(_contextHandle!);
-        } catch (_) {}
-        _contextHandle = null;
-      }
-      if (_modelHandle != null) {
-        try {
-          await backend.modelFree(_modelHandle!);
-        } catch (_) {}
-        _modelHandle = null;
-      }
-      _modelPath = null;
-      _cachedModelMetadata = null;
-      _isReady = false;
+      await _cleanupFailedLoadState();
 
       LlamaLogger.instance.error(
         'Failed to load model $modelName from URL $url',
@@ -224,10 +212,14 @@ class LlamaEngine {
 
   /// Loads a multimodal projector model for vision/audio support.
   Future<void> loadMultimodalProjector(String mmProjPath) async {
-    final mmProjName = mmProjPath.split('/').last;
+    final mmProjName = _displayNameForSource(mmProjPath);
     LlamaLogger.instance.info('Loading multimodal projector: $mmProjName');
     _ensureReady(requireContext: false);
     try {
+      if (_mmContextHandle != null) {
+        await unloadMultimodalProjector();
+      }
+
       _mmContextHandle = await backend.multimodalContextCreate(
         _modelHandle!,
         mmProjPath,
@@ -243,6 +235,18 @@ class LlamaEngine {
       );
       rethrow;
     }
+  }
+
+  /// Unloads the active multimodal projector while keeping the model loaded.
+  Future<void> unloadMultimodalProjector() async {
+    final mmContextHandle = _mmContextHandle;
+    if (mmContextHandle == null) {
+      return;
+    }
+
+    LlamaLogger.instance.info('Unloading multimodal projector');
+    _mmContextHandle = null;
+    await backend.multimodalContextFree(mmContextHandle);
   }
 
   /// Releases all allocated resources.
@@ -1069,6 +1073,21 @@ class LlamaEngine {
     return Future<int?>.value(null);
   }
 
+  /// Returns native llama.cpp perf timings for the active context when available.
+  Future<BackendPerfContextData?> getPerformanceContext() {
+    final candidate = backend;
+    final contextHandle = _contextHandle;
+    if (contextHandle == null) {
+      return Future<BackendPerfContextData?>.value(null);
+    }
+    if (candidate is BackendPerformanceDiagnostics) {
+      return (candidate as BackendPerformanceDiagnostics).getPerformanceContext(
+        contextHandle,
+      );
+    }
+    return Future<BackendPerfContextData?>.value(null);
+  }
+
   /// Returns true if the current hardware and backend support GPU acceleration.
   Future<bool> isGpuSupported() => backend.isGpuSupported();
 
@@ -1117,6 +1136,41 @@ class LlamaEngine {
       }
     }
     return false;
+  }
+
+  Future<void> _cleanupFailedLoadState() async {
+    if (_contextHandle != null) {
+      try {
+        await backend.contextFree(_contextHandle!);
+      } catch (_) {}
+      _contextHandle = null;
+    }
+    if (_modelHandle != null) {
+      try {
+        await backend.modelFree(_modelHandle!);
+      } catch (_) {}
+      _modelHandle = null;
+    }
+    _modelPath = null;
+    _cachedModelMetadata = null;
+    _isReady = false;
+  }
+
+  String _displayNameForSource(String source) {
+    final parsedUri = Uri.tryParse(source);
+    if (parsedUri != null &&
+        parsedUri.hasScheme &&
+        parsedUri.pathSegments.isNotEmpty) {
+      final lastSegment = parsedUri.pathSegments.last;
+      if (lastSegment.isNotEmpty) {
+        return Uri.decodeComponent(lastSegment);
+      }
+    }
+
+    final normalizedSource = source.replaceAll('\\', '/');
+    final segments = normalizedSource.split('/');
+    final lastSegment = segments.isNotEmpty ? segments.last : source;
+    return lastSegment.isNotEmpty ? lastSegment : source;
   }
 
   int? _firstNonWhitespaceIndex(String value) {

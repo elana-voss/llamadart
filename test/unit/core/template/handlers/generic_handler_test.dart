@@ -66,6 +66,36 @@ void main() {
       expect(parsed.toolCalls.first.function?.name, equals('get_weather'));
     });
 
+    test('keeps malformed generic tool_calls array as content', () {
+      final handler = GenericHandler();
+
+      final parsed = handler.parse(
+        '{"tool_calls":[{"name":"get_weather","arguments":{"city":"Seoul"}},{"arguments":{"city":"Busan"}}]}',
+      );
+
+      expect(parsed.toolCalls, isEmpty);
+      expect(
+        parsed.content,
+        equals(
+          '{"tool_calls":[{"name":"get_weather","arguments":{"city":"Seoul"}},{"arguments":{"city":"Busan"}}]}',
+        ),
+      );
+    });
+
+    test('keeps malformed generic tool_call object as content', () {
+      final handler = GenericHandler();
+
+      final parsed = handler.parse(
+        '{"tool_call":{"arguments":{"city":"Seoul"}}}',
+      );
+
+      expect(parsed.toolCalls, isEmpty);
+      expect(
+        parsed.content,
+        equals('{"tool_call":{"arguments":{"city":"Seoul"}}}'),
+      );
+    });
+
     test('parses partial generic tool_call with missing arguments', () {
       final handler = GenericHandler();
 

@@ -22,5 +22,14 @@ void main() {
       jsonDecode(parsed.toolCalls.first.function!.arguments!),
       containsPair('city', 'Seoul'),
     );
+
+    final malformed = handler.parse(
+      '<|tool_call|>[{"arguments":{"city":"Seoul"}}]',
+    );
+    expect(malformed.toolCalls, isEmpty);
+    expect(
+      malformed.content,
+      equals('<|tool_call|>[{"arguments":{"city":"Seoul"}}]'),
+    );
   });
 }

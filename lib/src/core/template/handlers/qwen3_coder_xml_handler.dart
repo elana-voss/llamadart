@@ -10,6 +10,7 @@ import '../chat_template_handler.dart';
 import '../peg_parser_builder.dart';
 import '../template_internal_metadata.dart';
 import '../thinking_utils.dart';
+import '../tool_call_parsing_utils.dart';
 import '../xml_tool_call_format.dart';
 
 /// Handler for Qwen 2.5/3 Coder XML format.
@@ -239,11 +240,9 @@ class Qwen3CoderXmlHandler extends ChatTemplateHandler {
     }
     final result = <String, Map<String, dynamic>>{};
     for (final entry in propertiesRaw.entries) {
-      final value = entry.value;
-      if (value is Map<String, dynamic>) {
+      final value = ToolCallParsingUtils.coerceMap(entry.value);
+      if (value != null) {
         result[entry.key.toString()] = value;
-      } else if (value is Map) {
-        result[entry.key.toString()] = Map<String, dynamic>.from(value);
       }
     }
     return result;

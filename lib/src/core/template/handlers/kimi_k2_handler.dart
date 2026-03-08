@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../models/chat/chat_message.dart';
@@ -11,6 +9,7 @@ import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../thinking_utils.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for Kimi K2 format.
 ///
@@ -148,7 +147,14 @@ class KimiK2Handler extends ChatTemplateHandler {
           ? remaining.substring(afterScopeStart)
           : remaining.substring(afterScopeStart, scopeEndIdx);
 
-      _parseScopeBody(scopeBody, isPartial: isPartial, toolCalls: toolCalls);
+      final removeScope = _parseScopeBody(
+        scopeBody,
+        isPartial: isPartial,
+        toolCalls: toolCalls,
+      );
+      if (!removeScope) {
+        break;
+      }
 
       final removeEnd = scopeEndIdx == -1
           ? remaining.length
@@ -163,22 +169,28 @@ class KimiK2Handler extends ChatTemplateHandler {
     return remaining;
   }
 
-  void _parseScopeBody(
+  bool _parseScopeBody(
     String scopeBody, {
     required bool isPartial,
     required List<LlamaCompletionChunkToolCall> toolCalls,
   }) {
+    final parsedToolCalls = <LlamaCompletionChunkToolCall>[];
     var cursor = 0;
+    var foundCall = false;
     while (cursor < scopeBody.length) {
       final callStartIdx = scopeBody.indexOf(_callStart, cursor);
       if (callStartIdx == -1) {
-        return;
+        break;
       }
+      foundCall = true;
 
       final nameStart = callStartIdx + _callStart.length;
       final argStartIdx = scopeBody.indexOf(_argStart, nameStart);
       if (argStartIdx == -1) {
-        return;
+        if (!isPartial) {
+          return false;
+        }
+        break;
       }
 
       final rawName = scopeBody.substring(nameStart, argStartIdx).trim();
@@ -189,64 +201,58 @@ class KimiK2Handler extends ChatTemplateHandler {
       if (jsonExtraction == null) {
         if (isPartial && normalizedName != null) {
           final partialArguments = scopeBody.substring(argsStart).trim();
-          toolCalls.add(
-            LlamaCompletionChunkToolCall(
-              index: toolCalls.length,
-              id: 'call_${toolCalls.length}',
-              type: 'function',
-              function: LlamaCompletionChunkFunction(
-                name: normalizedName,
-                arguments: partialArguments,
-              ),
+          parsedToolCalls.add(
+            ToolCallParsingUtils.createFunctionToolCall(
+              index: toolCalls.length + parsedToolCalls.length,
+              name: normalizedName,
+              arguments: partialArguments,
             ),
           );
+          toolCalls.addAll(parsedToolCalls);
+          return true;
         }
-        return;
+        return isPartial;
       }
 
       final callEndIdx = scopeBody.indexOf(_callEnd, jsonExtraction.end);
       if (callEndIdx == -1) {
         if (isPartial && normalizedName != null) {
-          toolCalls.add(
-            LlamaCompletionChunkToolCall(
-              index: toolCalls.length,
-              id: 'call_${toolCalls.length}',
-              type: 'function',
-              function: LlamaCompletionChunkFunction(
-                name: normalizedName,
-                arguments: jsonExtraction.json,
-              ),
+          parsedToolCalls.add(
+            ToolCallParsingUtils.createFunctionToolCall(
+              index: toolCalls.length + parsedToolCalls.length,
+              name: normalizedName,
+              arguments: jsonExtraction.json,
             ),
           );
+          toolCalls.addAll(parsedToolCalls);
+          return true;
         }
-        return;
+        return isPartial;
       }
 
       if (normalizedName != null) {
-        toolCalls.add(
-          LlamaCompletionChunkToolCall(
-            index: toolCalls.length,
-            id: 'call_${toolCalls.length}',
-            type: 'function',
-            function: LlamaCompletionChunkFunction(
-              name: normalizedName,
-              arguments: _normalizeArguments(jsonExtraction.json),
-            ),
+        parsedToolCalls.add(
+          ToolCallParsingUtils.createFunctionToolCall(
+            index: toolCalls.length + parsedToolCalls.length,
+            name: normalizedName,
+            arguments: _normalizeArguments(jsonExtraction.json),
           ),
         );
       }
 
       cursor = callEndIdx + _callEnd.length;
     }
+
+    if (!foundCall && !isPartial) {
+      return false;
+    }
+
+    toolCalls.addAll(parsedToolCalls);
+    return true;
   }
 
   String _normalizeArguments(String rawJson) {
-    try {
-      final decoded = jsonDecode(rawJson);
-      return jsonEncode(decoded);
-    } catch (_) {
-      return rawJson;
-    }
+    return ToolCallParsingUtils.normalizeJsonArguments(rawJson);
   }
 
   String? _normalizeToolName(String rawName) {
@@ -266,51 +272,17 @@ class KimiK2Handler extends ChatTemplateHandler {
   }
 
   _JsonExtraction? _extractJsonObject(String input, int startIndex) {
-    if (startIndex >= input.length || input[startIndex] != '{') {
+    final jsonSlice = ToolCallParsingUtils.extractLeadingJsonValue(
+      input,
+      startIndex,
+    );
+    if (jsonSlice == null || jsonSlice.value is! Map) {
       return null;
     }
-
-    var depth = 0;
-    var inString = false;
-    var escaped = false;
-
-    for (var i = startIndex; i < input.length; i++) {
-      final codeUnit = input.codeUnitAt(i);
-
-      if (inString) {
-        if (escaped) {
-          escaped = false;
-          continue;
-        }
-        if (codeUnit == 0x5C) {
-          escaped = true;
-          continue;
-        }
-        if (codeUnit == 0x22) {
-          inString = false;
-        }
-        continue;
-      }
-
-      if (codeUnit == 0x22) {
-        inString = true;
-        continue;
-      }
-
-      if (codeUnit == 0x7B) {
-        depth++;
-      } else if (codeUnit == 0x7D) {
-        depth--;
-        if (depth == 0) {
-          return _JsonExtraction(
-            json: input.substring(startIndex, i + 1),
-            end: i + 1,
-          );
-        }
-      }
-    }
-
-    return null;
+    return _JsonExtraction(
+      json: input.substring(startIndex, jsonSlice.end),
+      end: jsonSlice.end,
+    );
   }
 
   @override

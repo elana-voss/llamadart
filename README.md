@@ -130,7 +130,7 @@ Note: embedding support depends on backend/runtime capabilities.
 <details>
 <summary>Full module matrix (available modules by target)</summary>
 
-Backend module matrix from pinned native tag `b8157`:
+Backend module matrix from pinned native tag `b8216`:
 
 | Target | Available backend modules in bundle |
 |--------|-------------------------------------|
@@ -241,7 +241,7 @@ The default web backend uses `WebGpuLlamaBackend` as a router for WebGPU and CPU
 - Runtime assets are published via:
   - [`leehack/llama-web-bridge`](https://github.com/leehack/llama-web-bridge)
   - [`leehack/llama-web-bridge-assets`](https://github.com/leehack/llama-web-bridge-assets)
-- `example/chat_app` prefers local bridge assets, then falls back to jsDelivr.
+- `example/chat_app` prefers vendored local bridge assets on localhost for dev/runtime validation, and otherwise prefers pinned jsDelivr assets with local fallback.
 - Web embeddings require bridge assets with embedding APIs (`v0.1.7` or newer).
 - Browser Cache Storage is used for repeated model loads when `useCache` is enabled (default).
 - `loadMultimodalProjector` is supported on web for URL-based model/mmproj assets.

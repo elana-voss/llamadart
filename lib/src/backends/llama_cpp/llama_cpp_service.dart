@@ -116,6 +116,20 @@ typedef _MtmdLogSetDart = void Function(ggml_log_callback, Pointer<Void>);
 /// This service handles the direct interaction with the native Llama.cpp library,
 /// including loading models, creating contexts, managing memory, and running inference.
 class LlamaCppService {
+  static const bool _androidVulkanAllowKqvOffload = bool.fromEnvironment(
+    'LLAMADART_ANDROID_VULKAN_ALLOW_KQV',
+    defaultValue: false,
+  );
+  static const bool _androidVulkanAllowOpOffload = bool.fromEnvironment(
+    'LLAMADART_ANDROID_VULKAN_ALLOW_OP_OFFLOAD',
+    defaultValue: false,
+  );
+  static const bool _androidVulkanAllowFlashAttn = bool.fromEnvironment(
+    'LLAMADART_ANDROID_VULKAN_ALLOW_FLASH_ATTN',
+    defaultValue: false,
+  );
+
+  static const int _maxStartupDiagnostics = 32;
   static const Map<String, int> _androidCpuVariantPriority = <String, int>{
     'android_armv9.2_2': 0,
     'android_armv9.2_1': 1,
@@ -154,6 +168,7 @@ class LlamaCppService {
   bool _mtmdFallbackLookupAttempted = false;
   bool _mtmdPrimarySymbolsUnavailable = false;
   _MtmdApi? _mtmdFallbackApi;
+  final List<String> _startupDiagnostics = <String>[];
 
   // --- Internal State ---
   final Map<int, _LlamaModelWrapper> _models = {};
@@ -198,6 +213,46 @@ class LlamaCppService {
         effectiveGpuLayers <= 0;
   }
 
+  /// Returns whether Android Vulkan should use conservative context settings.
+  ///
+  /// Some Android Vulkan stacks can abort during decode scheduling when
+  /// context-time KQV/op offload and flash-attention auto-selection stay fully
+  /// enabled. We keep model layers offloaded but disable the more aggressive
+  /// context compute knobs for stability.
+  static bool shouldUseConservativeAndroidVulkanContextConfig(
+    ModelParams modelParams, {
+    int? resolvedGpuLayers,
+    bool isAndroid = false,
+  }) {
+    if (!isAndroid) {
+      return false;
+    }
+
+    final effectiveGpuLayers =
+        resolvedGpuLayers ?? resolveGpuLayersForLoad(modelParams);
+    return modelParams.preferredBackend == GpuBackend.vulkan &&
+        effectiveGpuLayers > 0;
+  }
+
+  /// Returns whether Android should enable the experimental Vulkan fast path
+  /// for the given local model file.
+  static bool shouldEnableExperimentalAndroidVulkanAcceleration(
+    String? modelPath, {
+    bool isAndroid = false,
+  }) {
+    if (!isAndroid || modelPath == null || modelPath.isEmpty) {
+      return false;
+    }
+
+    final normalized = path.basename(modelPath).toLowerCase();
+    return normalized.contains('qwen3.5-0.8b') ||
+        normalized.contains('qwen3.5-2b') ||
+        normalized.contains('qwen3.5-4b') ||
+        normalized.contains('qwen_qwen3.5-0.8b') ||
+        normalized.contains('qwen_qwen3.5-2b') ||
+        normalized.contains('qwen_qwen3.5-4b');
+  }
+
   /// Resolves effective context batch parameters.
   ///
   /// Legacy behavior is preserved when [ModelParams.batchSize] and
@@ -237,12 +292,33 @@ class LlamaCppService {
   /// This follows effective model-load configuration from model loading.
   static bool resolveMtmdUseGpuForLoad(
     ModelParams modelParams,
-    int effectiveGpuLayers,
-  ) {
+    int effectiveGpuLayers, {
+    String? modelPath,
+    bool isAndroid = false,
+  }) {
+    if (shouldForceCpuProjectorForAndroid(modelPath, isAndroid: isAndroid)) {
+      return false;
+    }
+
     return !shouldDisableContextGpuOffload(
       modelParams,
       resolvedGpuLayers: effectiveGpuLayers,
     );
+  }
+
+  /// Returns whether Android should keep mtmd projector work on CPU for the
+  /// given model file.
+  static bool shouldForceCpuProjectorForAndroid(
+    String? modelPath, {
+    bool isAndroid = false,
+  }) {
+    if (!isAndroid || modelPath == null || modelPath.isEmpty) {
+      return false;
+    }
+
+    final normalized = path.basename(modelPath).toLowerCase();
+    return normalized.contains('qwen3.5-0.8b') ||
+        normalized.contains('qwen_qwen3.5-0.8b');
   }
 
   // --- Core Methods ---
@@ -389,18 +465,26 @@ class LlamaCppService {
 
     for (final candidates in preloadCandidates) {
       var loaded = false;
+      Object? lastError;
+      String? lastCandidate;
       for (final candidate in candidates) {
         try {
           _preloadedCoreLibraries.add(DynamicLibrary.open(candidate));
           loaded = true;
           break;
-        } catch (_) {
+        } catch (error) {
+          lastError = error;
+          lastCandidate = candidate;
           continue;
         }
       }
 
-      if (!loaded) {
-        // Best effort: continue and let normal fallback paths handle loading.
+      if (!loaded && lastError != null && lastCandidate != null) {
+        _recordStartupDiagnostic(
+          'Failed to preload Linux core library candidates '
+          '`${candidates.join(', ')}`; last error from `$lastCandidate`: '
+          '$lastError',
+        );
       }
     }
   }
@@ -424,12 +508,17 @@ class LlamaCppService {
     ];
 
     for (final libraryFileName in coreLibraries) {
-      _ensureLinuxLibraryPresent(
+      copyMissingLinuxLibrary(
         targetDirectory: targetDir,
         sourceDirectories: sourceDirectories,
         fileName: libraryFileName,
+        onDiagnostic: _recordStartupDiagnostic,
       );
-      _ensureLinuxSonameAlias(targetDir, libraryFileName);
+      ensureLinuxSonameAlias(
+        directory: targetDir,
+        baseFileName: libraryFileName,
+        onDiagnostic: _recordStartupDiagnostic,
+      );
     }
 
     const backendModuleLibraries = <String>[
@@ -442,12 +531,17 @@ class LlamaCppService {
     ];
 
     for (final libraryFileName in backendModuleLibraries) {
-      _ensureLinuxLibraryPresent(
+      copyMissingLinuxLibrary(
         targetDirectory: targetDir,
         sourceDirectories: sourceDirectories,
         fileName: libraryFileName,
+        onDiagnostic: _recordStartupDiagnostic,
       );
-      _ensureLinuxSonameAlias(targetDir, libraryFileName);
+      ensureLinuxSonameAlias(
+        directory: targetDir,
+        baseFileName: libraryFileName,
+        onDiagnostic: _recordStartupDiagnostic,
+      );
     }
 
     _linuxPreparedLibraryDirectory = targetDir;
@@ -523,14 +617,20 @@ class LlamaCppService {
     }
   }
 
-  void _ensureLinuxLibraryPresent({
+  /// Copies a missing Linux runtime dependency into the target directory.
+  ///
+  /// Returns `true` when the dependency already exists or is copied
+  /// successfully. When a copy attempt fails, [onDiagnostic] receives a
+  /// best-effort diagnostic message.
+  static bool copyMissingLinuxLibrary({
     required String targetDirectory,
     required List<String> sourceDirectories,
     required String fileName,
+    void Function(String message)? onDiagnostic,
   }) {
     final targetPath = path.join(targetDirectory, fileName);
     if (File(targetPath).existsSync()) {
-      return;
+      return true;
     }
 
     for (final sourceDirectory in sourceDirectories) {
@@ -541,37 +641,58 @@ class LlamaCppService {
       }
       try {
         sourceFile.copySync(targetPath);
-        return;
-      } catch (_) {
+        return true;
+      } catch (error) {
+        onDiagnostic?.call(
+          'Failed to copy Linux runtime dependency `$fileName` from '
+          '`$sourcePath` to `$targetPath`: $error',
+        );
         continue;
       }
     }
+
+    return false;
   }
 
-  void _ensureLinuxSonameAlias(String directory, String baseFileName) {
+  /// Ensures a Linux SONAME alias file exists for [baseFileName].
+  ///
+  /// Returns `true` when the alias already exists or is created successfully.
+  /// When both symlink creation and fallback copying fail, [onDiagnostic]
+  /// receives a best-effort diagnostic message.
+  static bool ensureLinuxSonameAlias({
+    required String directory,
+    required String baseFileName,
+    void Function(String message)? onDiagnostic,
+  }) {
     final sourcePath = path.join(directory, baseFileName);
     final sourceFile = File(sourcePath);
     if (!sourceFile.existsSync()) {
-      return;
+      return false;
     }
 
     final aliasPath = '$sourcePath.0';
     final aliasFile = File(aliasPath);
     if (aliasFile.existsSync()) {
-      return;
+      return true;
     }
 
+    Object? linkError;
     try {
       Link(aliasPath).createSync(baseFileName);
-      return;
-    } catch (_) {
-      // Fall through to copying when symlinks are unavailable.
+      return true;
+    } catch (error) {
+      linkError = error;
     }
 
     try {
       sourceFile.copySync(aliasPath);
-    } catch (_) {
-      // Best effort only.
+      return true;
+    } catch (copyError) {
+      onDiagnostic?.call(
+        'Failed to create or copy Linux SONAME alias `$aliasPath` for '
+        '`$sourcePath`: link error=$linkError; copy error=$copyError',
+      );
+      return false;
     }
   }
 
@@ -653,6 +774,21 @@ class LlamaCppService {
     } catch (_) {
       return null;
     }
+  }
+
+  /// Returns recent best-effort startup diagnostics collected during setup.
+  List<String> getStartupDiagnostics() {
+    return List<String>.unmodifiable(_startupDiagnostics);
+  }
+
+  void _recordStartupDiagnostic(String message) {
+    if (message.isEmpty) {
+      return;
+    }
+    if (_startupDiagnostics.length >= _maxStartupDiagnostics) {
+      _startupDiagnostics.removeAt(0);
+    }
+    _startupDiagnostics.add(message);
   }
 
   /// Resolves Windows backend-module directory for dynamic backend loading.
@@ -932,7 +1068,12 @@ class LlamaCppService {
       gpuLayers = 0;
       forcedCpuFallback = true;
     }
-    final mtmdUseGpu = resolveMtmdUseGpuForLoad(modelParams, gpuLayers);
+    final mtmdUseGpu = resolveMtmdUseGpuForLoad(
+      modelParams,
+      gpuLayers,
+      modelPath: modelPath,
+      isAndroid: Platform.isAndroid,
+    );
 
     mparams.n_gpu_layers = gpuLayers;
     mparams.use_mmap = true;
@@ -959,7 +1100,7 @@ class LlamaCppService {
     }
 
     final handle = _getHandle();
-    _models[handle] = _LlamaModelWrapper(modelPtr);
+    _models[handle] = _LlamaModelWrapper(modelPtr, sourcePath: modelPath);
     _loraAdapters[handle] = {};
     _modelToMtmdUseGpu[handle] = mtmdUseGpu;
     final resolvedBackend = _resolveBackendNameForLoad(
@@ -1888,6 +2029,33 @@ class LlamaCppService {
       ctxParams.op_offload = false;
       ctxParams.flash_attn_typeAsInt =
           llama_flash_attn_type.LLAMA_FLASH_ATTN_TYPE_DISABLED.value;
+    } else if (shouldUseConservativeAndroidVulkanContextConfig(
+      params,
+      resolvedGpuLayers: resolvedModelGpuLayers,
+      isAndroid: Platform.isAndroid,
+    )) {
+      final enableExperimentalAcceleration =
+          shouldEnableExperimentalAndroidVulkanAcceleration(
+            model.sourcePath,
+            isAndroid: Platform.isAndroid,
+          );
+      final allowKqv =
+          _androidVulkanAllowKqvOffload || enableExperimentalAcceleration;
+      final allowOp =
+          _androidVulkanAllowOpOffload || enableExperimentalAcceleration;
+      final allowFlash =
+          _androidVulkanAllowFlashAttn || enableExperimentalAcceleration;
+
+      if (!allowKqv) {
+        ctxParams.offload_kqv = false;
+      }
+      if (!allowOp) {
+        ctxParams.op_offload = false;
+      }
+      if (!allowFlash) {
+        ctxParams.flash_attn_typeAsInt =
+            llama_flash_attn_type.LLAMA_FLASH_ATTN_TYPE_DISABLED.value;
+      }
     }
 
     final ctxPtr = llama_init_from_model(model.pointer, ctxParams);
@@ -1952,6 +2120,11 @@ class LlamaCppService {
       ctx,
       clearMemory: hasMediaParts || !params.reusePromptPrefix,
     );
+    llama_perf_context_reset(ctx.pointer);
+    final existingSampler = _samplers[contextHandle];
+    if (existingSampler != null) {
+      llama_perf_sampler_reset(existingSampler);
+    }
 
     // 2. Prepare Resources
     final nCtx = llama_n_ctx(ctx.pointer);
@@ -1972,6 +2145,7 @@ class LlamaCppService {
 
     try {
       // 3. Ingest Prompt (Text or Multimodal)
+      final promptEvalStopwatch = Stopwatch()..start();
       final initialTokens = _ingestPrompt(
         contextHandle,
         modelHandle,
@@ -1985,6 +2159,10 @@ class LlamaCppService {
         modelParams,
         allowTextPromptReuse: !hasMediaParts && params.reusePromptPrefix,
       );
+      promptEvalStopwatch.stop();
+      ctx.lastPerfPromptEvalMs =
+          promptEvalStopwatch.elapsedMicroseconds / 1000.0;
+      ctx.lastPerfPromptEvalTokens = initialTokens;
 
       // 4. Initialize and Run Sampler Loop
       final sampler = _initializeSampler(
@@ -2931,14 +3109,22 @@ class LlamaCppService {
     final cancelToken = Pointer<Int8>.fromAddress(cancelTokenAddress);
     int currentPos = startPos;
     final accumulatedBytes = <int>[];
+    final evalStopwatch = Stopwatch()..start();
+    var sampleMicros = 0;
+    var evalMicros = 0;
+    var generatedTokens = 0;
 
     for (int i = 0; i < params.maxTokens; i++) {
       if (cancelToken.value == 1) break;
       if (currentPos >= nCtx) break;
 
+      final sampleTick = Stopwatch()..start();
       final selectedToken = llama_sampler_sample(sampler, ctx.pointer, -1);
+      sampleTick.stop();
+      sampleMicros += sampleTick.elapsedMicroseconds;
       if (llama_vocab_is_eog(vocab, selectedToken)) break;
 
+      final pieceTick = Stopwatch()..start();
       final n = llama_token_to_piece(
         vocab,
         selectedToken,
@@ -2947,10 +3133,13 @@ class LlamaCppService {
         0,
         preservedTokenIds.contains(selectedToken),
       );
+      pieceTick.stop();
+      sampleMicros += pieceTick.elapsedMicroseconds;
 
       if (n > 0) {
         final bytes = pieceBuf.asTypedList(n).toList();
         yield bytes;
+        generatedTokens++;
 
         if (stopSequences.isNotEmpty) {
           accumulatedBytes.addAll(bytes);
@@ -2969,8 +3158,18 @@ class LlamaCppService {
       batch.seq_id[0][0] = 0;
       batch.logits[0] = 1;
 
-      if (llama_decode(ctx.pointer, batch) != 0) break;
+      final evalTick = Stopwatch()..start();
+      final decodeStatus = llama_decode(ctx.pointer, batch);
+      evalTick.stop();
+      evalMicros += evalTick.elapsedMicroseconds;
+      if (decodeStatus != 0) break;
     }
+
+    evalStopwatch.stop();
+    ctx.lastPerfEvalMs = evalMicros / 1000.0;
+    ctx.lastPerfSampleMs = sampleMicros / 1000.0;
+    ctx.lastPerfEvalTokens = generatedTokens;
+    ctx.lastPerfSampleCount = generatedTokens;
   }
 
   _LazyGrammarConfig? _buildLazyGrammarConfig(GenerationParams params) {
@@ -3830,6 +4029,54 @@ class LlamaCppService {
     return llama_n_ctx(ctx.pointer);
   }
 
+  /// Returns native llama.cpp perf timings for [contextHandle].
+  ({
+    double loadMs,
+    double promptEvalMs,
+    double evalMs,
+    double sampleMs,
+    int promptEvalTokens,
+    int evalTokens,
+    int sampleCount,
+    int reusedGraphs,
+  })
+  getPerformanceContext(int contextHandle) {
+    final ctx = _contexts[contextHandle];
+    if (ctx == null) {
+      throw Exception("Invalid context handle");
+    }
+
+    final perf = llama_perf_context(ctx.pointer);
+    final sampler = _samplers[contextHandle];
+    final samplerPerf = sampler != null ? llama_perf_sampler(sampler) : null;
+
+    final promptEvalMs = perf.t_p_eval_ms > 0
+        ? perf.t_p_eval_ms
+        : ctx.lastPerfPromptEvalMs;
+    final evalMs = perf.t_eval_ms > 0 ? perf.t_eval_ms : ctx.lastPerfEvalMs;
+    final sampleMs = (samplerPerf?.t_sample_ms ?? 0) > 0
+        ? samplerPerf!.t_sample_ms
+        : ctx.lastPerfSampleMs;
+    final promptEvalTokens = perf.n_p_eval > 0
+        ? perf.n_p_eval
+        : ctx.lastPerfPromptEvalTokens;
+    final evalTokens = perf.n_eval > 0 ? perf.n_eval : ctx.lastPerfEvalTokens;
+    final sampleCount = (samplerPerf?.n_sample ?? 0) > 0
+        ? samplerPerf!.n_sample
+        : ctx.lastPerfSampleCount;
+
+    return (
+      loadMs: perf.t_load_ms,
+      promptEvalMs: promptEvalMs,
+      evalMs: evalMs,
+      sampleMs: sampleMs,
+      promptEvalTokens: promptEvalTokens,
+      evalTokens: evalTokens,
+      sampleCount: sampleCount,
+      reusedGraphs: perf.n_reused,
+    );
+  }
+
   /// Checks if a multimodal context exists.
   bool hasMultimodalContext(int mmContextHandle) {
     return _mtmdContexts.containsKey(mmContextHandle);
@@ -3990,7 +4237,8 @@ class _LlamaLoraWrapper {
 
 class _LlamaModelWrapper {
   final Pointer<llama_model> pointer;
-  _LlamaModelWrapper(this.pointer);
+  final String? sourcePath;
+  _LlamaModelWrapper(this.pointer, {this.sourcePath});
   void dispose() {
     llama_model_free(pointer);
   }
@@ -4000,6 +4248,12 @@ class _LlamaContextWrapper {
   final Pointer<llama_context> pointer;
   final _LlamaModelWrapper? _modelKeepAlive;
   List<int>? cachedPromptTokens;
+  double lastPerfPromptEvalMs = 0;
+  double lastPerfEvalMs = 0;
+  double lastPerfSampleMs = 0;
+  int lastPerfPromptEvalTokens = 0;
+  int lastPerfEvalTokens = 0;
+  int lastPerfSampleCount = 0;
   _LlamaContextWrapper(this.pointer, this._modelKeepAlive);
   void dispose() {
     // ignore: unused_local_variable

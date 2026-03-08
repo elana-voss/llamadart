@@ -918,6 +918,70 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
     return null;
   }
 
+  String? _resolveMmprojPathForModel(DownloadableModel model) {
+    if (!model.isMultimodal) {
+      return null;
+    }
+
+    if (kIsWeb) {
+      if (model.mmprojUrl != null && model.mmprojUrl!.isNotEmpty) {
+        return model.mmprojUrl!;
+      }
+      return (model.supportsVision || model.supportsAudio) ? model.url : null;
+    }
+
+    if (_modelsDir == null) {
+      return null;
+    }
+
+    if (model.mmprojFilename != null && model.mmprojFilename!.isNotEmpty) {
+      return '${_modelsDir!}/${model.mmprojFilename}';
+    }
+
+    return (model.supportsVision || model.supportsAudio)
+        ? '${_modelsDir!}/${model.filename}'
+        : null;
+  }
+
+  Future<void> _setSelectedModelMmprojMode(
+    ChatProvider provider,
+    DownloadableModel model, {
+    required bool enable,
+  }) async {
+    if (!enable) {
+      await provider.clearMmprojPath();
+      return;
+    }
+
+    final mmprojPath = _resolveMmprojPathForModel(model);
+    if (mmprojPath == null || mmprojPath.isEmpty) {
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No matching mmproj is configured for this model.'),
+        ),
+      );
+      return;
+    }
+
+    provider.updateMmprojPath(mmprojPath);
+    if (provider.isLoaded) {
+      await provider.loadConfiguredMmproj();
+      return;
+    }
+
+    if (!mounted) {
+      return;
+    }
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('mmproj configured. Load the model to activate it.'),
+      ),
+    );
+  }
+
   Future<void> _loadConfiguredModel(ChatProvider provider) async {
     await provider.loadModel();
     if (!mounted) return;
@@ -946,6 +1010,10 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
         final isEmbedded = widget.embeddedPanel;
         final isWide = width >= 980 && !isEmbedded;
         final horizontalPadding = isEmbedded ? 12.0 : (isWide ? 28.0 : 16.0);
+        final selectedModel = _findSelectedModel(provider);
+        final selectedModelMmprojPath = selectedModel == null
+            ? null
+            : _resolveMmprojPathForModel(selectedModel);
         final selectedBackend = _resolveSelectedBackend(provider);
         final contextOptions = _buildContextSizeOptions(provider.contextSize);
         final hasModelPath =
@@ -953,6 +1021,9 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
         final hasMmprojPath = (provider.settings.mmprojPath ?? '')
             .trim()
             .isNotEmpty;
+        final canToggleSelectedModelMmproj =
+            selectedModelMmprojPath != null &&
+            selectedModelMmprojPath.isNotEmpty;
         final modelLabel = provider.activeModelName;
         final threadLabel = provider.numberOfThreads == 0
             ? '(auto detected)'
@@ -1368,13 +1439,45 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
                         spacing: 10,
                         runSpacing: 10,
                         children: [
-                          if (hasMmprojPath)
+                          if (canToggleSelectedModelMmproj)
                             OutlinedButton.icon(
                               onPressed: provider.isInitializing
                                   ? null
-                                  : provider.clearMmprojPath,
+                                  : () => unawaited(
+                                      _setSelectedModelMmprojMode(
+                                        provider,
+                                        selectedModel!,
+                                        enable: !hasMmprojPath,
+                                      ),
+                                    ),
+                              icon: Icon(
+                                hasMmprojPath
+                                    ? Icons.visibility_off_outlined
+                                    : Icons.visibility_outlined,
+                              ),
+                              label: Text(
+                                hasMmprojPath ? 'Text only' : 'Use mmproj',
+                              ),
+                            )
+                          else if (hasMmprojPath)
+                            OutlinedButton.icon(
+                              onPressed: provider.isInitializing
+                                  ? null
+                                  : () => unawaited(provider.clearMmprojPath()),
                               icon: const Icon(Icons.visibility_off_outlined),
                               label: const Text('Disable mmproj'),
+                            ),
+                          if (hasMmprojPath &&
+                              provider.isLoaded &&
+                              !provider.isMmprojLoaded)
+                            FilledButton.tonalIcon(
+                              onPressed: provider.isInitializing
+                                  ? null
+                                  : () => unawaited(
+                                      provider.loadConfiguredMmproj(),
+                                    ),
+                              icon: const Icon(Icons.visibility_rounded),
+                              label: const Text('Load mmproj'),
                             ),
                           if (provider.isLoaded)
                             FilledButton.tonalIcon(
@@ -1399,8 +1502,10 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
                     Align(
                       alignment: Alignment.centerLeft,
                       child: Text(
-                        'Set GPU layers to 99 for Auto. '
-                        'Runtime values apply on next model load.',
+                        hasMmprojPath
+                            ? 'mmproj is configured for this model. Use Text only to disable it, or Load mmproj to attach it without a full reload. '
+                                  'Set GPU layers to 99 for Auto. Runtime values apply on next model load.'
+                            : 'Set GPU layers to 99 for Auto. Runtime values apply on next model load.',
                         style: Theme.of(context).textTheme.bodySmall?.copyWith(
                           color: Theme.of(context).colorScheme.onSurfaceVariant,
                         ),

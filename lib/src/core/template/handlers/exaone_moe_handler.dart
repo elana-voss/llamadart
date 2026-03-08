@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
@@ -14,6 +12,7 @@ import '../chat_template_handler.dart';
 import '../template_internal_metadata.dart';
 import '../thinking_utils.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for EXAONE MoE format.
 ///
@@ -118,17 +117,13 @@ class ExaoneMoeHandler extends ChatTemplateHandler {
 
       final payload = _stripCodeFence(body.trim());
 
-      try {
-        final decoded = jsonDecode(payload);
-        final toolCall = _toToolCall(decoded, toolCalls.length);
-        if (toolCall == null) {
-          continue;
-        }
-        toolCalls.add(toolCall);
-        contentText = contentText.replaceFirst(match.group(0)!, '');
-      } catch (_) {
-        // Keep malformed tool blocks in content.
+      final decoded = ToolCallParsingUtils.decodeJsonValue(payload);
+      final toolCall = _toToolCall(decoded, toolCalls.length);
+      if (toolCall == null) {
+        continue;
       }
+      toolCalls.add(toolCall);
+      contentText = contentText.replaceFirst(match.group(0)!, '');
     }
 
     return ChatParseResult(
@@ -139,10 +134,10 @@ class ExaoneMoeHandler extends ChatTemplateHandler {
   }
 
   LlamaCompletionChunkToolCall? _toToolCall(Object? value, int index) {
-    if (value is! Map) {
+    final map = ToolCallParsingUtils.coerceMap(value);
+    if (map == null) {
       return null;
     }
-    final map = Map<String, dynamic>.from(value);
 
     String? name;
     String? id;
@@ -152,8 +147,11 @@ class ExaoneMoeHandler extends ChatTemplateHandler {
       name = map['name'] as String;
       arguments = map['arguments'];
       id = map['id'] as String?;
-    } else if (map['function'] is Map) {
-      final function = Map<String, dynamic>.from(map['function'] as Map);
+    } else {
+      final function = ToolCallParsingUtils.coerceMap(map['function']);
+      if (function == null) {
+        return null;
+      }
       name = function['name'] as String?;
       arguments = function['arguments'];
       id = map['id'] as String?;
@@ -163,16 +161,12 @@ class ExaoneMoeHandler extends ChatTemplateHandler {
       return null;
     }
 
-    return LlamaCompletionChunkToolCall(
+    return ToolCallParsingUtils.createFunctionToolCall(
       index: index,
-      id: id ?? 'call_$index',
+      name: name,
+      id: id,
+      arguments: arguments ?? <String, dynamic>{},
       type: (map['type'] as String?) ?? 'function',
-      function: LlamaCompletionChunkFunction(
-        name: name,
-        arguments: arguments is String
-            ? arguments
-            : jsonEncode(arguments ?? <String, dynamic>{}),
-      ),
     );
   }
 

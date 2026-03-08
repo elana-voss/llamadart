@@ -96,5 +96,37 @@ void main() {
       );
       expect(result.prompt, contains('<end_function_response>'));
     });
+
+    test('normalizes JSON-string tool responses when rendering', () {
+      final source = File(
+        'test/fixtures/templates/functiongemma-270m-it.jinja',
+      ).readAsStringSync();
+
+      final result = ChatTemplateEngine.render(
+        templateSource: source,
+        messages: const [
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.tool,
+            content: [
+              LlamaToolResultContent(
+                id: 'call_0',
+                name: 'get_current_time',
+                result: '{"timestamp":"2026-02-12T14:47:00"}',
+              ),
+            ],
+          ),
+        ],
+        metadata: const {
+          'tokenizer.ggml.bos_token': '<bos>',
+          'tokenizer.ggml.eos_token': '<eos>',
+        },
+        addAssistant: false,
+      );
+
+      expect(
+        result.prompt,
+        contains('timestamp:<escape>2026-02-12T14:47:00<escape>'),
+      );
+    });
   });
 }

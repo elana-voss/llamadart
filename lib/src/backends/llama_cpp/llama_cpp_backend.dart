@@ -18,12 +18,14 @@ class NativeLlamaBackend
         LlamaBackend,
         BackendAvailability,
         BackendRuntimeDiagnostics,
+        BackendPerformanceDiagnostics,
         BackendEmbeddings,
         BackendBatchEmbeddings {
   Isolate? _isolate;
   SendPort? _sendPort;
   final ReceivePort _responsesPort = ReceivePort();
   Pointer<Int8>? _activeCancelToken;
+  void Function()? _activeGenerationCleanup;
 
   bool _isReady = false;
   LlamaLogLevel _currentLogLevel = LlamaLogLevel.warn;
@@ -163,12 +165,40 @@ class NativeLlamaBackend
     GenerationParams params, {
     List<LlamaContentPart>? parts,
   }) {
-    final controller = StreamController<List<int>>();
+    late final StreamController<List<int>> controller;
     final rp = ReceivePort();
 
     final cancelToken = malloc<Int8>(1);
     cancelToken.value = 0;
     _activeCancelToken = cancelToken;
+
+    var cleanedUp = false;
+    void cleanup() {
+      if (cleanedUp) {
+        return;
+      }
+      cleanedUp = true;
+
+      rp.close();
+      if (!controller.isClosed) {
+        unawaited(controller.close());
+      }
+      malloc.free(cancelToken);
+      if (_activeCancelToken == cancelToken) {
+        _activeCancelToken = null;
+      }
+      if (_activeGenerationCleanup == cleanup) {
+        _activeGenerationCleanup = null;
+      }
+    }
+
+    controller = StreamController<List<int>>(
+      onCancel: () {
+        cancelGeneration();
+        cleanup();
+      },
+    );
+    _activeGenerationCleanup = cleanup;
 
     _sendPort!.send(
       GenerateRequest(
@@ -185,20 +215,10 @@ class NativeLlamaBackend
       if (msg is TokenResponse) {
         controller.add(msg.bytes);
       } else if (msg is DoneResponse) {
-        controller.close();
-        rp.close();
-        malloc.free(cancelToken);
-        if (_activeCancelToken == cancelToken) {
-          _activeCancelToken = null;
-        }
+        cleanup();
       } else if (msg is ErrorResponse) {
         controller.addError(Exception(msg.message));
-        controller.close();
-        rp.close();
-        malloc.free(cancelToken);
-        if (_activeCancelToken == cancelToken) {
-          _activeCancelToken = null;
-        }
+        cleanup();
       }
     });
 
@@ -362,6 +382,33 @@ class NativeLlamaBackend
   }
 
   @override
+  Future<BackendPerfContextData?> getPerformanceContext(
+    int contextHandle,
+  ) async {
+    await _ensureIsolate();
+    final rp = ReceivePort();
+    _sendPort!.send(PerformanceContextRequest(contextHandle, rp.sendPort));
+    final res = await rp.first;
+    rp.close();
+    if (res is PerformanceContextResponse) {
+      return BackendPerfContextData(
+        loadMs: res.loadMs,
+        promptEvalMs: res.promptEvalMs,
+        evalMs: res.evalMs,
+        sampleMs: res.sampleMs,
+        promptEvalTokens: res.promptEvalTokens,
+        evalTokens: res.evalTokens,
+        sampleCount: res.sampleCount,
+        reusedGraphs: res.reusedGraphs,
+      );
+    }
+    if (res is ErrorResponse) {
+      throw Exception(res.message);
+    }
+    return null;
+  }
+
+  @override
   bool get supportsUrlLoading => false;
 
   @override
@@ -376,6 +423,9 @@ class NativeLlamaBackend
 
   @override
   Future<void> dispose() async {
+    _activeCancelToken?.value = 1;
+    _activeGenerationCleanup?.call();
+
     if (_sendPort != null) {
       final rp = ReceivePort();
       _sendPort!.send(DisposeRequest(rp.sendPort));
@@ -384,11 +434,8 @@ class NativeLlamaBackend
     }
     _isolate?.kill();
     _responsesPort.close();
-    // Signal cancellation to any running tasks before killing isolate
-    _activeCancelToken?.value = 1;
-    // Do NOT free _activeCancelToken here; it is freed by the generate listener
-    // or leaked if isolate dies immediately (which is safe/acceptable).
     _activeCancelToken = null;
+    _activeGenerationCleanup = null;
     _isReady = false;
   }
 

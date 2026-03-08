@@ -9,6 +9,9 @@ class MockLlamaBackend
   MockLlamaBackend({
     this.backendName = 'Mock',
     this.urlLoadingSupported = false,
+    this.failModelLoad = false,
+    this.failModelLoadFromUrl = false,
+    this.failContextCreate = false,
   });
 
   bool _isReady = false;
@@ -17,12 +20,17 @@ class MockLlamaBackend
   int resolvedGpuLayers = 0;
   int modelLoadCalls = 0;
   int modelLoadFromUrlCalls = 0;
+  int modelFreeCalls = 0;
+  int contextFreeCalls = 0;
   int tokenizeCalls = 0;
   int modelMetadataCalls = 0;
   String generationText = 'response';
   List<String>? generationChunks;
   final String backendName;
   final bool urlLoadingSupported;
+  final bool failModelLoad;
+  final bool failModelLoadFromUrl;
+  final bool failContextCreate;
 
   @override
   bool get isReady => _isReady;
@@ -30,6 +38,9 @@ class MockLlamaBackend
   @override
   Future<int> modelLoad(String path, ModelParams params) async {
     modelLoadCalls += 1;
+    if (failModelLoad) {
+      throw Exception('model load failed');
+    }
     _isReady = true;
     return 1;
   }
@@ -41,18 +52,30 @@ class MockLlamaBackend
     Function(double progress)? onProgress,
   }) async {
     modelLoadFromUrlCalls += 1;
+    if (failModelLoadFromUrl) {
+      throw Exception('url model load failed');
+    }
     _isReady = true;
     return 1;
   }
 
   @override
-  Future<void> modelFree(int modelHandle) async {}
+  Future<void> modelFree(int modelHandle) async {
+    modelFreeCalls += 1;
+  }
 
   @override
-  Future<int> contextCreate(int modelHandle, ModelParams params) async => 1;
+  Future<int> contextCreate(int modelHandle, ModelParams params) async {
+    if (failContextCreate) {
+      throw Exception('context create failed');
+    }
+    return 1;
+  }
 
   @override
-  Future<void> contextFree(int contextHandle) async {}
+  Future<void> contextFree(int contextHandle) async {
+    contextFreeCalls += 1;
+  }
 
   @override
   Future<int> getContextSize(int contextHandle) async => 2048;
@@ -244,6 +267,25 @@ void main() {
       expect(engine.isReady, true);
     });
 
+    test(
+      'loadModel cleans up partial state when context creation fails',
+      () async {
+        final failingBackend = MockLlamaBackend(failContextCreate: true);
+        final failingEngine = LlamaEngine(failingBackend);
+
+        await expectLater(
+          () => failingEngine.loadModel('C:\\models\\qwen-test.gguf'),
+          throwsA(isA<LlamaModelException>()),
+        );
+
+        expect(failingBackend.modelFreeCalls, 1);
+        expect(failingBackend.contextFreeCalls, 0);
+        expect(failingEngine.isReady, isFalse);
+        expect(failingEngine.modelHandle, isNull);
+        expect(failingEngine.contextHandle, isNull);
+      },
+    );
+
     test('loadModel routes through URL loader when supported', () async {
       final webBackend = MockLlamaBackend(urlLoadingSupported: true);
       final webEngine = LlamaEngine(webBackend);
@@ -279,6 +321,29 @@ void main() {
       },
     );
 
+    test(
+      'loadModelFromUrl cleans up partial state when context creation fails',
+      () async {
+        final failingBackend = MockLlamaBackend(
+          urlLoadingSupported: true,
+          failContextCreate: true,
+        );
+        final failingEngine = LlamaEngine(failingBackend);
+
+        await expectLater(
+          () =>
+              failingEngine.loadModelFromUrl('https://example.com/model.gguf'),
+          throwsA(isA<LlamaModelException>()),
+        );
+
+        expect(failingBackend.modelFreeCalls, 1);
+        expect(failingBackend.contextFreeCalls, 0);
+        expect(failingEngine.isReady, isFalse);
+        expect(failingEngine.modelHandle, isNull);
+        expect(failingEngine.contextHandle, isNull);
+      },
+    );
+
     test('create throws when not ready', () {
       expect(
         () => engine.create([
@@ -294,6 +359,20 @@ void main() {
       expect(await engine.supportsVision, true);
       expect(await engine.supportsAudio, false);
     });
+
+    test(
+      'multimodal projector can be unloaded without unloading model',
+      () async {
+        await engine.loadModel('qwen-test.gguf');
+        await engine.loadMultimodalProjector('proj.gguf');
+
+        await engine.unloadMultimodalProjector();
+
+        expect(await engine.supportsVision, isFalse);
+        expect(await engine.supportsAudio, isFalse);
+        expect(engine.isReady, isTrue);
+      },
+    );
 
     test('tokenize and detokenize', () async {
       await engine.loadModel('qwen-test.gguf');

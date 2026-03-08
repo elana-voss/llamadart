@@ -103,6 +103,29 @@ void main() {
     expect(parsed.content, isEmpty);
   });
 
+  test('preserves string arguments in <tool_call> payloads', () {
+    final handler = HermesHandler();
+    final parsed = handler.parse(
+      '<tool_call>{"name":"get_current_weather","arguments":"{\\"location\\":\\"Seoul\\"}"}</tool_call>',
+    );
+
+    expect(parsed.toolCalls, hasLength(1));
+    expect(
+      parsed.toolCalls.first.function?.arguments,
+      equals('{"location":"Seoul"}'),
+    );
+  });
+
+  test('keeps malformed tagged payload as content', () {
+    final handler = HermesHandler();
+    const input = '<tool_call>{"arguments":{"location":"Seoul"}}</tool_call>';
+
+    final parsed = handler.parse(input);
+
+    expect(parsed.toolCalls, isEmpty);
+    expect(parsed.content, equals(input));
+  });
+
   test('keeps non-tagged payload as content', () {
     final handler = HermesHandler();
     final parsed = handler.parse(

@@ -36,6 +36,9 @@ Note: this is a Flutter app, so use `flutter test` (not `dart test`).
 ### 2. Choose and Download a Model
 1. The app will open to a **Manage Models** screen.
 2. Select one of the pre-configured models (for example: FunctionGemma 270M, Qwen3.5 0.8B/2B/4B/9B, Llama 3.2 3B, Gemma 3/3n, DeepSeek R1 distills).
+   - Qwen3.5 presets now use Unsloth `Q4_K_M` GGUFs across platforms.
+   - Quick picks: `0.8B` for web/older phones, `2B` for mobile + low-RAM laptops, `4B` for most native desktop/laptop runs, `9B` for desktop-class devices with more headroom.
+   - Qwen3.5 small presets default to non-thinking mode for smoother latency and fewer reasoning loops; turn thinking on only when you need extra reasoning.
 3. Tap the **Download** icon. The app uses `Dio` to download the model directly to your device's documents directory.
 4. Once downloaded, tap **Select** to load the model.
 
@@ -189,12 +192,12 @@ _(Add screenshots here when complete)_
 **Slow generation:**
 - Ensure hardware acceleration is enabled (e.g., Metal on Apple, Vulkan on Android/Linux/Windows).
 - Check if `GPU Layers` is set to a high enough value (default 99 offloads all layers).
-- Use a model with a smaller quantization level (e.g., Q4_K_M).
+- Use a smaller model or a lighter 4-bit quant when your device is memory-bound.
 
 **Multimodal instability or decode crashes (Qwen3.5 VLMs):**
-- Keep Qwen3.5 model defaults unless you are tuning carefully (`Context Size` 8192, `Max Tokens` 1024).
+- Keep Qwen3.5 model defaults unless you are tuning carefully (`0.8B` uses `Context Size` 4096; `2B`/`4B`/`9B` use 8192; all ship with `Max Tokens` 1024).
 - Start a fresh conversation before large image prompts to avoid context-slot pressure.
-- If crashes persist on lower-memory devices, switch to the 0.8B/2B variants or disable multimodal for that run.
+- If crashes persist on lower-memory devices, keep thinking off, switch to the 0.8B/2B variants, or disable multimodal for that run.
 
 **`Invalid argument(s): string is not well-formed UTF-16` in Flutter painting:**
 - This indicates malformed streamed text (broken surrogate pair) reached text rendering.
@@ -259,7 +262,7 @@ _(Add screenshots here when complete)_
 ### Web Limitations
 
 - Web uses the llama.cpp bridge backend with CPU mode and experimental WebGPU acceleration.
-- Bridge runtime loading is local-first (`web/webgpu_bridge`) with jsDelivr fallback.
+- Bridge runtime loading prefers local `web/webgpu_bridge` assets on `localhost`/`127.0.0.1` for dev validation, and otherwise prefers pinned jsDelivr assets with local fallback.
 - Override CDN source/version with `window.__llamadartBridgeAssetsRepo` and
   `window.__llamadartBridgeAssetsTag` in `web/index.html`.
 - To pin self-hosted assets before build:
@@ -283,6 +286,8 @@ _(Add screenshots here when complete)_
 - Image/audio attachments on web use browser file bytes (local path-based loading remains native-only).
 - On web, model files are loaded by URL (local file download/cache flow differs from native).
 - On web, **Download** prefetches model/mmproj bytes into browser Cache Storage with progress.
+- Qwen3.5 `0.8B` WebGPU loads are capped to a low layer count for stable browser text output.
+- Qwen3.5 multimodal web runs currently use CPU-safe fallback for stability even when the text model was loaded with WebGPU acceleration.
 - For very large web models, runtime may switch to worker-thread fetch-backed loading to reduce contiguous allocation pressure; this path may bypass prefetch cache reuse.
 - If optional `llama_webgpu_core_mem64` bridge assets are present and supported by the browser, chat app bridge bootstrapping can prefer wasm64 core and transparently fall back to wasm32.
 - Large single-file web model loading requires cross-origin isolation
@@ -300,10 +305,26 @@ _(Add screenshots here when complete)_
   hardware concurrency; explicit override wins).
 - Bridge bootstrap console logs are quiet by default. Enable verbose startup logs with
   `window.__llamadartBridgeBootstrapVerbose = true` before bridge bootstrap.
+- For autonomous browser smoke tests without downloading a real model, append
+  `?llamadart_mock_bridge=echo` (or `qwen-weird`) and use
+  `tool/testing/playwright_chat_app_mock_smoke.py` against a local static server.
 - Runtime status chips expose execution mode/core/cache/worker fallback/runtime notes,
   so non-COI or worker fallback perf constraints are visible in-app.
 - On web, multimodal projector loading is eager by default for stability: if an
   mmproj is configured, it is loaded together with the model.
+
+### Android Qwen Notes
+
+- On recent Pixel-class Android devices, Qwen3.5 `0.8B` and `2B` currently run
+  faster in `CPU` mode than `Vulkan` in this app, so the Android preset flow now
+  prefers `CPU` for those two models.
+- Qwen3.5 `4B` is closer: `CPU` still wins on short prompts, but `Vulkan` is now
+  much faster than before and may be worth comparing for longer generations.
+- Runtime chips now include native llama.cpp timing breakdowns: `p_eval`,
+  `eval`, `sample`, and `reuse`.
+- Android text-only chat is stable even when `mmproj` is loaded.
+- Android real image prompting is currently recommended in `CPU` mode for
+  Qwen3.5 `0.8B`; `Vulkan` multimodal is still not reliable enough.
 
 ### Hugging Face static deployment (CI)
 

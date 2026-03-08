@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:dinja/dinja.dart';
 
 import '../../grammar/json_schema_converter.dart';
@@ -13,6 +11,7 @@ import '../chat_parse_result.dart';
 import '../chat_template_handler.dart';
 import '../template_internal_metadata.dart';
 import '../tool_call_grammar_utils.dart';
+import '../tool_call_parsing_utils.dart';
 
 /// Handler for GPT-OSS format.
 ///
@@ -187,14 +186,10 @@ class GptOssHandler extends ChatTemplateHandler {
 
     if (functionName != null && parseToolCalls) {
       toolCalls.add(
-        LlamaCompletionChunkToolCall(
+        ToolCallParsingUtils.createFunctionToolCall(
           index: toolCalls.length,
-          id: 'call_${toolCalls.length}',
-          type: 'function',
-          function: LlamaCompletionChunkFunction(
-            name: functionName,
-            arguments: _normalizeArguments(normalizedBody),
-          ),
+          name: functionName,
+          arguments: _normalizeArguments(normalizedBody),
         ),
       );
       return;
@@ -224,19 +219,12 @@ class GptOssHandler extends ChatTemplateHandler {
   }
 
   String _normalizeArguments(String rawBody) {
-    final value = rawBody.trim();
-    if (value.isEmpty) {
-      return '{}';
-    }
-    try {
-      final decoded = jsonDecode(value);
-      if (decoded is Map) {
-        return jsonEncode(Map<String, dynamic>.from(decoded));
-      }
-      return jsonEncode({'value': decoded});
-    } catch (_) {
-      return value;
-    }
+    return ToolCallParsingUtils.normalizeJsonArguments(
+      rawBody,
+      trimInput: true,
+      wrapScalarsAsValue: true,
+      emptyFallback: '{}',
+    );
   }
 
   @override

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:llamadart/llamadart.dart';
 import 'package:llamadart_chat_example/providers/chat_provider.dart';
@@ -28,6 +29,10 @@ void main() {
     );
   });
 
+  tearDown(() {
+    debugDefaultTargetPlatformOverride = null;
+  });
+
   group('ChatProvider Unit Tests', () {
     test('Initial state', () {
       expect(provider.messages, isEmpty);
@@ -49,6 +54,38 @@ void main() {
       );
       expect(mockEngine.initialized, isTrue);
       expect(provider.maxGenerationTokens, greaterThan(0));
+    });
+
+    test('loadConfiguredMmproj attaches projector to loaded model', () async {
+      await provider.loadModel();
+      provider.updateMmprojPath('test-mmproj.gguf');
+
+      final loaded = await provider.loadConfiguredMmproj();
+
+      expect(loaded, isTrue);
+      expect(provider.hasConfiguredMmproj, isTrue);
+      expect(provider.isMmprojLoaded, isTrue);
+      expect(mockEngine.loadMultimodalProjectorCalls, 1);
+    });
+
+    test('clearMmprojPath unloads active projector immediately', () async {
+      final mmprojProvider = ChatProvider(
+        chatService: mockChatService,
+        settingsService: mockSettingsService,
+        initialSettings: const ChatSettings(
+          modelPath: 'test_model.gguf',
+          mmprojPath: 'test-mmproj.gguf',
+        ),
+      );
+
+      await mmprojProvider.loadModel();
+      expect(mmprojProvider.isMmprojLoaded, isTrue);
+
+      await mmprojProvider.clearMmprojPath();
+
+      expect(mmprojProvider.hasConfiguredMmproj, isFalse);
+      expect(mmprojProvider.isMmprojLoaded, isFalse);
+      expect(mockEngine.unloadMultimodalProjectorCalls, 1);
     });
 
     test('loadModel failure', () async {
@@ -467,6 +504,65 @@ void main() {
         expect(provider.settings.toolsEnabled, isTrue);
       },
     );
+
+    test('Qwen3.5 small presets use Unsloth Q4_K_M non-thinking defaults', () {
+      final qwenModels = DownloadableModel.defaultModels
+          .where((model) => model.name.startsWith('Qwen3.5 '))
+          .toList(growable: false);
+
+      expect(qwenModels, hasLength(4));
+
+      for (final model in qwenModels) {
+        expect(model.url, contains('huggingface.co/unsloth/Qwen3.5-'));
+        expect(model.url, contains('Q4_K_M.gguf'));
+        expect(model.supportsThinking, isTrue);
+        expect(model.preset.thinkingEnabled, isFalse);
+        expect(model.preset.temperature, 0.7);
+        expect(model.preset.topK, 20);
+        expect(model.preset.topP, 0.8);
+        expect(model.preset.penalty, 1.0);
+      }
+
+      final small = qwenModels.singleWhere(
+        (model) => model.name == 'Qwen3.5 0.8B Instruct',
+      );
+      expect(small.preset.contextSize, 4096);
+
+      final larger = qwenModels.where(
+        (model) => model.name != 'Qwen3.5 0.8B Instruct',
+      );
+      for (final model in larger) {
+        expect(model.preset.contextSize, 8192);
+      }
+    });
+
+    test('applyModelPreset prefers CPU for Qwen3.5 0.8B and 2B on Android', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      for (final modelName in const [
+        'Qwen3.5 0.8B Instruct',
+        'Qwen3.5 2B Instruct',
+      ]) {
+        final qwenModel = DownloadableModel.defaultModels.singleWhere(
+          (model) => model.name == modelName,
+        );
+
+        provider.applyModelPreset(qwenModel);
+
+        expect(provider.settings.preferredBackend, GpuBackend.cpu);
+        expect(provider.settings.gpuLayers, 0);
+      }
+    });
+
+    test('applyModelPreset reduces Android context for Qwen3.5 0.8B', () {
+      debugDefaultTargetPlatformOverride = TargetPlatform.android;
+      final qwenModel = DownloadableModel.defaultModels.singleWhere(
+        (model) => model.name == 'Qwen3.5 0.8B Instruct',
+      );
+
+      provider.applyModelPreset(qwenModel);
+
+      expect(provider.settings.contextSize, 2048);
+    });
   });
 
   group('MockChatService Tests', () {
