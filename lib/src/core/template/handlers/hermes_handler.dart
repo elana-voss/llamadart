@@ -128,7 +128,11 @@ class HermesHandler extends ChatTemplateHandler {
           parseFailed = true;
           break;
         }
-        final jsonStart = match.start + startOffset;
+        // Skip leading whitespace in namedToolStart to find the actual '{'
+        var jsonStart = match.start + startOffset;
+        while (jsonStart < text.length && _isWhitespace(text.codeUnitAt(jsonStart))) {
+          jsonStart++;
+        }
         final jsonRange = _extractJsonObjectRange(text, jsonStart);
         if (jsonRange == null) {
           parseFailed = true;
