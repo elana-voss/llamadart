@@ -58,7 +58,10 @@ void main() {
       '<tool_call> {"name":"get_current_weather","arguments":{"location":"Seoul"}}</tool_call>',
     );
     expect(parsed.toolCalls, hasLength(1));
-    expect(parsed.toolCalls.first.function?.name, equals('get_current_weather'));
+    expect(
+      parsed.toolCalls.first.function?.name,
+      equals('get_current_weather'),
+    );
     expect(
       jsonDecode(parsed.toolCalls.first.function!.arguments!),
       containsPair('location', 'Seoul'),
@@ -72,19 +75,28 @@ void main() {
       '<tool_call>\n{"name":"get_current_weather","arguments":{"location":"Seoul"}}\n</tool_call>',
     );
     expect(parsed.toolCalls, hasLength(1));
-    expect(parsed.toolCalls.first.function?.name, equals('get_current_weather'));
+    expect(
+      parsed.toolCalls.first.function?.name,
+      equals('get_current_weather'),
+    );
     expect(parsed.content, isEmpty);
   });
 
-  test('parses tool call with multiple whitespace chars between tag and JSON', () {
-    final handler = HermesHandler();
-    final parsed = handler.parse(
-      '<tool_call>  \n  {"name":"get_current_weather","arguments":{"location":"Seoul"}}\n</tool_call>',
-    );
-    expect(parsed.toolCalls, hasLength(1));
-    expect(parsed.toolCalls.first.function?.name, equals('get_current_weather'));
-    expect(parsed.content, isEmpty);
-  });
+  test(
+    'parses tool call with multiple whitespace chars between tag and JSON',
+    () {
+      final handler = HermesHandler();
+      final parsed = handler.parse(
+        '<tool_call>  \n  {"name":"get_current_weather","arguments":{"location":"Seoul"}}\n</tool_call>',
+      );
+      expect(parsed.toolCalls, hasLength(1));
+      expect(
+        parsed.toolCalls.first.function?.name,
+        equals('get_current_weather'),
+      );
+      expect(parsed.content, isEmpty);
+    },
+  );
 
   test('parses <function=name> JSON </function> tool call', () {
     final handler = HermesHandler();
