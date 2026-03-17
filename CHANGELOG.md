@@ -1,3 +1,12 @@
+## 0.6.7
+
+* **Native runtime sync and Linux loader hardening**:
+  * Updated native hook pinning and regenerated bindings to `leehack/llamadart-native@b8373`.
+  * Hardened Linux bundle loading for packaged apps and accepted versioned `libllamadart` mappings so colocated native dependencies resolve more reliably at runtime.
+* **Hermes tool-call parsing fix**:
+  * Fixed Hermes handler parsing when whitespace appears between `<tool_call>` and the JSON payload.
+* **Compatibility note**: no public API breaking changes in `0.6.7`.
+
 ## 0.6.6
 
 * **Runtime syncs**:

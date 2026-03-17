@@ -7,6 +7,16 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
+## 0.6.7
+
+- Synced native hook pinning and regenerated bindings to
+  `leehack/llamadart-native@b8373`.
+- Hardened Linux bundle loading for packaged apps and improved versioned
+  `libllamadart` dependency resolution.
+- Fixed Hermes tool-call parsing when whitespace appears between `<tool_call>`
+  and the JSON payload.
+- Compatibility note: no public API breaking changes in `0.6.7`.
+
 ## 0.6.6
 
 - Synced native hook pin to `leehack/llamadart-native@b8216`.
