@@ -52,7 +52,12 @@ final supportsAudio = await engine.supportsAudio;
 ## Tuning notes
 
 - Start with smaller images or audio inputs before changing backend settings.
+- The example chat app caps picked image inputs to a `384px` max edge before
+  staging them, but direct `LlamaImageContent(...)` usage does not resize media
+  for you.
 - Keep context and generation budgets tighter than your text-only defaults.
+- Follow-up turns after an image can still overflow the active context window if
+  conversation history grows too large.
 - If multimodal is unstable on GPU, establish a working CPU baseline first.
 - For broader tuning workflow and diagnostics guidance, see
   [Performance Tuning](./performance-tuning).

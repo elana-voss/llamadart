@@ -1,5 +1,10 @@
 ## Unreleased
 
+* **Multimodal context-safety hardening**:
+  * Converted native multimodal prompt-evaluation overflow paths into Dart exceptions instead of allowing downstream sampling asserts.
+  * Downscaled staged chat-app image picks to a `384px` max edge across Android, iOS, macOS, and Web to reduce multimodal context pressure.
+  * Added a local-only macOS Qwen3.5 multimodal repro harness plus CI-safe provider coverage for the new overflow guidance.
+
 ## 0.6.9
 
 * **iOS deployment target alignment**:

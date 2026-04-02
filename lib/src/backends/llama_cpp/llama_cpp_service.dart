@@ -2353,6 +2353,8 @@ class LlamaCppService {
           promptEvalStopwatch.elapsedMicroseconds / 1000.0;
       ctx.lastPerfPromptEvalTokens = initialTokens;
 
+      _ensureLogitsAvailableAfterPromptEval(ctx.pointer);
+
       // 4. Initialize and Run Sampler Loop
       final sampler = _initializeSampler(
         params,
@@ -2912,20 +2914,28 @@ class LlamaCppService {
 
       if (res == 0) {
         final newPast = malloc<llama_pos>();
-        if (_mtmdHelperEvalChunks(
-              mmCtx,
-              ctx.pointer,
-              chunks,
-              0,
-              0,
-              modelParams.n_batch,
-              true,
-              newPast,
-            ) ==
-            0) {
-          initialTokens = newPast.value;
+        try {
+          final evalResult = _mtmdHelperEvalChunks(
+            mmCtx,
+            ctx.pointer,
+            chunks,
+            0,
+            0,
+            modelParams.n_batch,
+            true,
+            newPast,
+          );
+          if (evalResult == 0) {
+            initialTokens = newPast.value;
+          } else {
+            throw Exception(
+              'Multimodal prompt evaluation failed: $evalResult. '
+              'The active context window may be too small for this image and conversation history.',
+            );
+          }
+        } finally {
+          malloc.free(newPast);
         }
-        malloc.free(newPast);
       } else {
         throw Exception("mtmd_tokenize failed: $res");
       }
@@ -2941,6 +2951,17 @@ class LlamaCppService {
     }
     ctx.cachedPromptTokens = null;
     return initialTokens;
+  }
+
+  void _ensureLogitsAvailableAfterPromptEval(Pointer<llama_context> ctx) {
+    if (llama_get_logits(ctx) != nullptr) {
+      return;
+    }
+
+    throw Exception(
+      'Prompt evaluation produced no logits for sampling. '
+      'The active context window may be too small for this prompt or multimodal decode failed.',
+    );
   }
 
   String _normalizeMtmdPromptMarkers(String prompt, int mediaPartCount) {

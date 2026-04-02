@@ -42,7 +42,7 @@ class ChatProvider extends ChangeNotifier {
   static const Duration _settingsSaveDebounceDelay = Duration(
     milliseconds: 220,
   );
-  static const int _androidMultimodalMaxImageEdge = 384;
+  static const int _multimodalMaxImageEdge = 384;
   static const String _androidDebugImagePath = String.fromEnvironment(
     'LLAMADART_CHAT_APP_DEBUG_IMAGE_PATH',
     defaultValue: '',
@@ -1107,6 +1107,17 @@ class ChatProvider extends ChangeNotifier {
             isInfo: true,
           ),
         );
+      } else if (errorText.contains('Multimodal prompt evaluation failed') ||
+          errorText.contains('produced no logits for sampling')) {
+        _messages.add(
+          ChatMessage(
+            text:
+                'This multimodal turn exceeded the active context window before decoding could finish. '
+                'Try a smaller image, a larger Context size, or clearing earlier image turns.',
+            isUser: false,
+            isInfo: true,
+          ),
+        );
       } else {
         _messages.add(ChatMessage(text: 'Error: $e', isUser: false));
       }
@@ -1290,7 +1301,7 @@ class ChatProvider extends ChangeNotifier {
     if (!kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
         _androidDebugImagePath.isNotEmpty) {
-      final prepared = await _prepareAndroidImagePart(_androidDebugImagePath);
+      final prepared = await _prepareImagePartFromPath(_androidDebugImagePath);
       if (prepared != null) {
         _addStagedPart(prepared);
         return;
@@ -1300,15 +1311,19 @@ class ChatProvider extends ChangeNotifier {
     await _pickMediaPart(
       type: FileType.image,
       fromPath: (path) async {
-        if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android) {
-          final prepared = await _prepareAndroidImagePart(path);
-          if (prepared != null) {
-            return prepared;
-          }
+        final prepared = await _prepareImagePartFromPath(path);
+        if (prepared != null) {
+          return prepared;
         }
         return LlamaImageContent(path: path);
       },
-      fromBytes: (bytes) => LlamaImageContent(bytes: bytes),
+      fromBytes: (bytes) async {
+        final prepared = await _prepareImagePartFromBytes(bytes);
+        if (prepared != null) {
+          return prepared;
+        }
+        return LlamaImageContent(bytes: bytes);
+      },
       browserReadError:
           'Could not read image bytes in browser. Try a different image file.',
       fileReadError: 'Could not read selected image file.',
@@ -1320,7 +1335,7 @@ class ChatProvider extends ChangeNotifier {
     await _pickMediaPart(
       type: FileType.audio,
       fromPath: (path) async => LlamaAudioContent(path: path),
-      fromBytes: (bytes) => LlamaAudioContent(bytes: bytes),
+      fromBytes: (bytes) async => LlamaAudioContent(bytes: bytes),
       browserReadError:
           'Could not read audio bytes in browser. Try a different audio file.',
       fileReadError: 'Could not read selected audio file.',
@@ -1331,7 +1346,7 @@ class ChatProvider extends ChangeNotifier {
   Future<void> _pickMediaPart({
     required FileType type,
     required Future<LlamaContentPart> Function(String path) fromPath,
-    required LlamaContentPart Function(Uint8List bytes) fromBytes,
+    required Future<LlamaContentPart> Function(Uint8List bytes) fromBytes,
     required String browserReadError,
     required String fileReadError,
     required String debugLabel,
@@ -1350,7 +1365,7 @@ class ChatProvider extends ChangeNotifier {
       if (kIsWeb) {
         final bytes = file.bytes;
         if (bytes != null && bytes.isNotEmpty) {
-          _addStagedPart(fromBytes(bytes));
+          _addStagedPart(await fromBytes(bytes));
           return;
         }
 
@@ -1367,7 +1382,7 @@ class ChatProvider extends ChangeNotifier {
 
       final bytes = file.bytes;
       if (bytes != null && bytes.isNotEmpty) {
-        _addStagedPart(fromBytes(bytes));
+        _addStagedPart(await fromBytes(bytes));
         return;
       }
 
@@ -1378,22 +1393,26 @@ class ChatProvider extends ChangeNotifier {
     }
   }
 
-  Future<LlamaImageContent?> _prepareAndroidImagePart(String path) async {
+  Future<LlamaImageContent?> _prepareImagePartFromPath(String path) async {
     try {
       final bytes = await File(path).readAsBytes();
-      if (bytes.isEmpty) {
-        return null;
-      }
-
-      final resizedBytes = await _downscaleImageBytesIfNeeded(
-        bytes,
-        maxEdge: _androidMultimodalMaxImageEdge,
-      );
-      return LlamaImageContent(bytes: resizedBytes);
+      return _prepareImagePartFromBytes(bytes);
     } catch (error) {
-      debugPrint('Error preparing Android image bytes: $error');
+      debugPrint('Error preparing image bytes from path: $error');
       return null;
     }
+  }
+
+  Future<LlamaImageContent?> _prepareImagePartFromBytes(Uint8List bytes) async {
+    if (bytes.isEmpty) {
+      return null;
+    }
+
+    final resizedBytes = await _downscaleImageBytesIfNeeded(
+      bytes,
+      maxEdge: _multimodalMaxImageEdge,
+    );
+    return LlamaImageContent(bytes: resizedBytes);
   }
 
   Future<Uint8List> _downscaleImageBytesIfNeeded(

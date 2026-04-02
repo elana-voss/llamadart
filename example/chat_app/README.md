@@ -199,7 +199,9 @@ _(Add screenshots here when complete)_
 
 **Multimodal instability or decode crashes (Qwen3.5 VLMs):**
 - Keep Qwen3.5 model defaults unless you are tuning carefully (`0.8B` uses `Context Size` 4096; `2B`/`4B`/`9B` use 8192; all ship with `Max Tokens` 1024).
+- The chat app now downscales picked multimodal images to a `384px` max edge before staging them, which reduces prompt/context pressure on Android, iOS, macOS, and Web.
 - Start a fresh conversation before large image prompts to avoid context-slot pressure.
+- If a follow-up turn after an image reports that the active context window was exceeded, retry with a smaller image, a larger `Context Size`, or fewer earlier image turns in the same chat.
 - If crashes persist on lower-memory devices, keep thinking off, switch to the 0.8B/2B variants, or disable multimodal for that run.
 
 **`Invalid argument(s): string is not well-formed UTF-16` in Flutter painting:**
