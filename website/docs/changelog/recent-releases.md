@@ -7,6 +7,20 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
+## 0.6.10
+
+- Synced native hook pinning and regenerated bindings through
+  `leehack/llamadart-native@b8638`.
+- Hardened multimodal prompt overflow handling so native failures surface as
+  Dart exceptions, and reduced staged chat-app image size to a `384px` max edge
+  to lower multimodal context pressure.
+- Added built-in Gemma 4 template detection/render/parse support, including
+  thinking and tool-call handling.
+- Added runtime projector capability gating so multimodal flows and the chat app
+  respect actual `supportsVision` / `supportsAudio` results instead of
+  model-family assumptions.
+- Compatibility note: no public API breaking changes in `0.6.10`.
+
 ## 0.6.9
 
 - Documented that iOS builds require a minimum deployment target of `16.4` or
