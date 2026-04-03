@@ -1,9 +1,18 @@
 ## Unreleased
 
+## 0.6.10
+
+* **Native runtime syncs**:
+  * Updated native hook pinning and regenerated bindings through `leehack/llamadart-native@b8638`.
 * **Multimodal context-safety hardening**:
   * Converted native multimodal prompt-evaluation overflow paths into Dart exceptions instead of allowing downstream sampling asserts.
   * Downscaled staged chat-app image picks to a `384px` max edge across Android, iOS, macOS, and Web to reduce multimodal context pressure.
   * Added a local-only macOS Qwen3.5 multimodal repro harness plus CI-safe provider coverage for the new overflow guidance.
+* **Gemma 4 template support and multimodal capability gating**:
+  * Added built-in Gemma 4 template detection, rendering, and parsing support, including thinking and tool-call handling.
+  * Added runtime projector capability checks so multimodal flows and the chat app gate image/audio input against `supportsVision` / `supportsAudio` instead of model-family assumptions.
+  * Documented current Gemma 4 projector behavior in the docs site and chat app guidance.
+* **Compatibility note**: no public API breaking changes in `0.6.10`.
 
 ## 0.6.9
 

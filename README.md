@@ -38,7 +38,7 @@
 
 ```yaml
 dependencies:
-  llamadart: ^0.6.9
+  llamadart: ^0.6.10
 ```
 
 ### 2. Run with defaults
@@ -134,7 +134,7 @@ Note: embedding support depends on backend/runtime capabilities.
 <details>
 <summary>Full module matrix (available modules by target)</summary>
 
-Backend module matrix from pinned native tag `b8480`:
+Backend module matrix from pinned native tag `b8638`:
 
 | Target | Available backend modules in bundle |
 |--------|-------------------------------------|
