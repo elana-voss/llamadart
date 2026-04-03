@@ -5,7 +5,9 @@ A Flutter chat application demonstrating real-world usage of llamadart with UI.
 ## Features
 
 - 🦙 Real-time chat with local LLM
-- 🖼️ **Vision & Audio Support**: Works on native and web bridge when a matching mmproj is loaded.
+- 🖼️ **Runtime-checked multimodal support**: The app enables image/audio inputs
+  only when the loaded projector/runtime path actually reports those
+  capabilities.
 - 📱 Material Design 3 UI
 - ⚙️ Model configuration (path, runtime-detected backend selection, GPU layers, context size)
 - 🧩 Capability badges per model (Tools / Thinking / Vision / Audio / Video)
@@ -44,6 +46,10 @@ Note: this is a Flutter app, so use `flutter test` (not `dart test`).
    - Qwen3.5 small presets default to non-thinking mode for smoother latency and fewer reasoning loops; turn thinking on only when you need extra reasoning.
 3. Tap the **Download** icon. The app uses `Dio` to download the model directly to your device's documents directory.
 4. Once downloaded, tap **Select** to load the model.
+   - Gemma 4 E2B is included as a GGUF + `mmproj` bundle. In the current
+     `llama.cpp` mtmd path used here, that projector exposes vision support but
+     not audio support, so the chat UI keeps image input enabled and audio input
+     disabled for this model.
 
 ### 3. Advanced Configuration (Optional)
 1. Tap the settings icon (⚙️) in the app bar.
@@ -203,6 +209,15 @@ _(Add screenshots here when complete)_
 - Start a fresh conversation before large image prompts to avoid context-slot pressure.
 - If a follow-up turn after an image reports that the active context window was exceeded, retry with a smaller image, a larger `Context Size`, or fewer earlier image turns in the same chat.
 - If crashes persist on lower-memory devices, keep thinking off, switch to the 0.8B/2B variants, or disable multimodal for that run.
+
+**Gemma 4 audio does not appear in the attachment menu:**
+- This is expected with the currently published Gemma 4 GGUF projector assets
+  used by the chat app.
+- The Gemma 4 E2B/E4B family supports audio in principle, but the current
+  `llama.cpp` mtmd projector path exposed to `llamadart` reports `vision=true`
+  and `audio=false` for the shipped `mmproj` files.
+- Image input should still work for Gemma 4 once the matching projector is
+  loaded.
 
 **`Invalid argument(s): string is not well-formed UTF-16` in Flutter painting:**
 - This indicates malformed streamed text (broken surrogate pair) reached text rendering.

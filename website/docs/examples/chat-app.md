@@ -34,6 +34,16 @@ flutter test
 - Runtime backend preference and GPU layer controls.
 - Persistent settings and split Dart/native logging controls.
 - Tool-calling toggles and model capability badges.
+- Runtime-verified multimodal capability gating after `mmproj` load. The app
+  hides unsupported attachment types even if a model family advertises broader
+  multimodal support.
+
+## Gemma 4 note
+
+The download library includes a Gemma 4 E2B GGUF + projector pair. On the
+current `llama.cpp` mtmd path used by `llamadart`, that projector exposes
+vision support but not audio support, so the app keeps image input enabled and
+audio input disabled for that model.
 
 ## Web notes
 

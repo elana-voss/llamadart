@@ -58,6 +58,16 @@ Inspect template output when debugging:
 - model-specific reasoning/content boundaries,
 - template routing differences after upgrades.
 
+## Built-in format coverage
+
+Built-in handlers include newer formats such as Gemma 4. In practice that means
+`llamadart` can detect and parse:
+
+- `<|turn> ... <turn|>` turn framing,
+- `<|think|>` thinking enablement in the system prompt,
+- `<|channel>thought ... <channel|>` reasoning output,
+- `<|tool_call>call:name{args}<tool_call|>` tool-call envelopes.
+
 ## Custom template overrides
 
 For application code, the supported customization path is `customTemplate` on

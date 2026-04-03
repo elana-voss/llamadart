@@ -159,7 +159,7 @@ class LlamaEngine {
         e,
         stackTrace,
       );
-      throw LlamaModelException("Failed to load model from $path", e);
+      throw LlamaModelException('Failed to load model from $path', e);
     }
   }
 

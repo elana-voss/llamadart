@@ -649,6 +649,18 @@ class ChatProvider extends ChangeNotifier {
         );
       }
 
+      final normalizedModelPath = (_settings.modelPath ?? '').toLowerCase();
+      final isGemma4 =
+          normalizedModelPath.contains('gemma-4') ||
+          normalizedModelPath.contains('gemma_4') ||
+          normalizedModelPath.contains('gemma4');
+      if (isGemma4 && _mmprojLoaded && _supportsVision && !_supportsAudio) {
+        _addInfoMessage(
+          'This Gemma 4 GGUF projector currently exposes vision only in the '
+          'llama.cpp mtmd runtime. Image input is available, but audio input is disabled.',
+        );
+      }
+
       _addInfoMessage('Model loaded successfully! Ready to chat.');
       _isLoaded = true;
       _loadedModelPath = _settings.modelPath;
@@ -659,7 +671,7 @@ class ChatProvider extends ChangeNotifier {
     } catch (e, stackTrace) {
       debugPrint('Error loading model: $e');
       debugPrint(stackTrace.toString());
-      _error = e.toString();
+      _error = _formatDisplayError(e);
       _loadedModelPath = null;
       _loadedMmprojPath = null;
       _supportsVision = false;
@@ -669,6 +681,17 @@ class ChatProvider extends ChangeNotifier {
       _isInitializing = false;
       notifyListeners();
     }
+  }
+
+  String _formatDisplayError(Object error) {
+    final raw = error.toString().trim();
+    const prefixes = <String>['LlamaException: ', 'Exception: '];
+    for (final prefix in prefixes) {
+      if (raw.startsWith(prefix)) {
+        return raw.substring(prefix.length).trim();
+      }
+    }
+    return raw;
   }
 
   void clearConversation() {
@@ -897,6 +920,7 @@ class ChatProvider extends ChangeNotifier {
     _lastFirstTokenLatencyMs = null;
     final toolsForTurn = _toolsForTurn();
     var hasMediaPartsInTurn = false;
+    var hasAudioPartsInTurn = false;
     var isCpuMultimodalTurn = false;
 
     try {
@@ -913,6 +937,7 @@ class ChatProvider extends ChangeNotifier {
       hasMediaPartsInTurn = chatParts.any(
         (part) => part is LlamaImageContent || part is LlamaAudioContent,
       );
+      hasAudioPartsInTurn = chatParts.any((part) => part is LlamaAudioContent);
       final resolvedGpuLayers = _runtimeGpuLayers;
       final runtimeLooksCpu = resolvedGpuLayers != null
           ? resolvedGpuLayers <= 0
@@ -1103,6 +1128,20 @@ class ChatProvider extends ChangeNotifier {
             text:
                 'Vision processing failed for this prompt. Try reloading the '
                 'model, using the bundled mmproj, or reducing image size.',
+            isUser: false,
+            isInfo: true,
+          ),
+        );
+      } else if (errorText.contains('Failed to load media part')) {
+        _messages.add(
+          ChatMessage(
+            text: hasAudioPartsInTurn
+                ? 'Audio preprocessing failed before the prompt reached the model. '
+                      'The current native mtmd path is strict about input formats; '
+                      'WAV/PCM is the safest option, while voice-note containers like '
+                      '`.m4a` often fail here. Try converting the clip to `.wav` and retrying.'
+                : 'Media preprocessing failed before the prompt reached the model. '
+                      'Try a different file or reload the matching mmproj and retry.',
             isUser: false,
             isInfo: true,
           ),

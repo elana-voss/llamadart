@@ -70,6 +70,10 @@ typedef _MtmdBitmapInitFromAudioNative =
     Pointer<mtmd_bitmap> Function(Size, Pointer<Float>);
 typedef _MtmdBitmapInitFromAudioDart =
     Pointer<mtmd_bitmap> Function(int, Pointer<Float>);
+typedef _MtmdSupportVisionNative = Bool Function(Pointer<mtmd_context>);
+typedef _MtmdSupportVisionDart = bool Function(Pointer<mtmd_context>);
+typedef _MtmdSupportAudioNative = Bool Function(Pointer<mtmd_context>);
+typedef _MtmdSupportAudioDart = bool Function(Pointer<mtmd_context>);
 typedef _MtmdBitmapFreeNative = Void Function(Pointer<mtmd_bitmap>);
 typedef _MtmdBitmapFreeDart = void Function(Pointer<mtmd_bitmap>);
 typedef _MtmdTokenizeNative =
@@ -2975,8 +2979,13 @@ class LlamaCppService {
       '<image>',
       '[IMG]',
       '<|image|>',
+      '<|audio|>',
+      '<|video|>',
       '<img>',
       '<|img|>',
+      '<image_soft_token>',
+      '<audio_soft_token>',
+      '<video_soft_token>',
     ];
 
     for (final placeholder in directPlaceholders) {
@@ -4291,6 +4300,44 @@ class LlamaCppService {
   bool hasMultimodalContext(int mmContextHandle) {
     return _mtmdContexts.containsKey(mmContextHandle);
   }
+
+  /// Returns whether the active multimodal projector supports vision input.
+  bool supportsVision(int mmContextHandle) {
+    final mmCtx = _mtmdContexts[mmContextHandle];
+    if (mmCtx == null) {
+      return false;
+    }
+
+    if (!_mtmdPrimarySymbolsUnavailable) {
+      try {
+        return mtmd_support_vision(mmCtx);
+      } on ArgumentError {
+        _mtmdPrimarySymbolsUnavailable = true;
+      }
+    }
+
+    final fallback = _resolveMtmdFallbackApi();
+    return fallback?.supportsVision(mmCtx) ?? false;
+  }
+
+  /// Returns whether the active multimodal projector supports audio input.
+  bool supportsAudio(int mmContextHandle) {
+    final mmCtx = _mtmdContexts[mmContextHandle];
+    if (mmCtx == null) {
+      return false;
+    }
+
+    if (!_mtmdPrimarySymbolsUnavailable) {
+      try {
+        return mtmd_support_audio(mmCtx);
+      } on ArgumentError {
+        _mtmdPrimarySymbolsUnavailable = true;
+      }
+    }
+
+    final fallback = _resolveMtmdFallbackApi();
+    return fallback?.supportsAudio(mmCtx) ?? false;
+  }
 }
 
 class _LazyGrammarConfig {
@@ -4332,6 +4379,8 @@ class _MtmdApi {
   final _MtmdHelperBitmapInitFromFileDart helperBitmapInitFromFile;
   final _MtmdHelperBitmapInitFromBufDart helperBitmapInitFromBuf;
   final _MtmdBitmapInitFromAudioDart bitmapInitFromAudio;
+  final _MtmdSupportVisionDart supportsVision;
+  final _MtmdSupportAudioDart supportsAudio;
   final _MtmdBitmapFreeDart bitmapFree;
   final _MtmdTokenizeDart tokenize;
   final _MtmdHelperEvalChunksDart helperEvalChunks;
@@ -4348,6 +4397,8 @@ class _MtmdApi {
     required this.helperBitmapInitFromFile,
     required this.helperBitmapInitFromBuf,
     required this.bitmapInitFromAudio,
+    required this.supportsVision,
+    required this.supportsAudio,
     required this.bitmapFree,
     required this.tokenize,
     required this.helperEvalChunks,
@@ -4413,6 +4464,14 @@ class _MtmdApi {
               _MtmdBitmapInitFromAudioNative,
               _MtmdBitmapInitFromAudioDart
             >('mtmd_bitmap_init_from_audio'),
+        supportsVision: library
+            .lookupFunction<_MtmdSupportVisionNative, _MtmdSupportVisionDart>(
+              'mtmd_support_vision',
+            ),
+        supportsAudio: library
+            .lookupFunction<_MtmdSupportAudioNative, _MtmdSupportAudioDart>(
+              'mtmd_support_audio',
+            ),
         bitmapFree: library
             .lookupFunction<_MtmdBitmapFreeNative, _MtmdBitmapFreeDart>(
               'mtmd_bitmap_free',

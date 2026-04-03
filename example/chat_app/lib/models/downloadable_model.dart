@@ -212,6 +212,33 @@ class DownloadableModel {
       ),
     ),
     DownloadableModel(
+      name: 'Gemma 4 E2B it',
+      description:
+          '🧪 Multimodal Gemma 4 vision bundle (2.83GB + 940MB mmproj) • Supports image input; audio support is not advertised by the current projector/runtime path.',
+      url:
+          'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/gemma-4-E2B-it-Q4_K_S.gguf?download=true',
+      filename: 'gemma-4-E2B-it-Q4_K_S.gguf',
+      mmprojUrl:
+          'https://huggingface.co/unsloth/gemma-4-E2B-it-GGUF/resolve/main/mmproj-F16.gguf?download=true',
+      mmprojFilename: 'gemma-4-E2B-it-mmproj-F16.gguf',
+      sizeBytes: 3043927168,
+      minRamGb: 8,
+      supportsVision: true,
+      supportsAudio: false,
+      supportsVideo: true,
+      supportsToolCalling: true,
+      supportsThinking: true,
+      preset: ModelPreset(
+        temperature: 0.7,
+        topK: 64,
+        topP: 0.95,
+        penalty: 1.0,
+        contextSize: 8192,
+        maxTokens: 1024,
+        thinkingEnabled: false,
+      ),
+    ),
+    DownloadableModel(
       name: 'LFM2.5 1.2B Thinking',
       description:
           '🧠 Reasoning-focused LFM (731MB) • Good compact thinking model.',
