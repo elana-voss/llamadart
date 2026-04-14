@@ -6588,6 +6588,52 @@ external void ggml_backend_tensor_get_async(
 
 @ffi.Native<
   ffi.Void Function(
+    ggml_backend_t,
+    ffi.Pointer<ggml_tensor>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+  )
+>()
+external void ggml_backend_tensor_set_2d_async(
+  ggml_backend_t backend,
+  ffi.Pointer<ggml_tensor> tensor,
+  ffi.Pointer<ffi.Void> data,
+  int offset,
+  int size,
+  int n_copies,
+  int stride_tensor,
+  int stride_data,
+);
+
+@ffi.Native<
+  ffi.Void Function(
+    ggml_backend_t,
+    ffi.Pointer<ggml_tensor>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+  )
+>()
+external void ggml_backend_tensor_get_2d_async(
+  ggml_backend_t backend,
+  ffi.Pointer<ggml_tensor> tensor,
+  ffi.Pointer<ffi.Void> data,
+  int offset,
+  int size,
+  int n_copies,
+  int stride_tensor,
+  int stride_data,
+);
+
+@ffi.Native<
+  ffi.Void Function(
     ffi.Pointer<ggml_tensor>,
     ffi.Pointer<ffi.Void>,
     ffi.Size,
@@ -6614,6 +6660,48 @@ external void ggml_backend_tensor_get(
   ffi.Pointer<ffi.Void> data,
   int offset,
   int size,
+);
+
+@ffi.Native<
+  ffi.Void Function(
+    ffi.Pointer<ggml_tensor>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+  )
+>()
+external void ggml_backend_tensor_set_2d(
+  ffi.Pointer<ggml_tensor> tensor,
+  ffi.Pointer<ffi.Void> data,
+  int offset,
+  int size,
+  int n_copies,
+  int stride_tensor,
+  int stride_data,
+);
+
+@ffi.Native<
+  ffi.Void Function(
+    ffi.Pointer<ggml_tensor>,
+    ffi.Pointer<ffi.Void>,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+    ffi.Size,
+  )
+>()
+external void ggml_backend_tensor_get_2d(
+  ffi.Pointer<ggml_tensor> tensor,
+  ffi.Pointer<ffi.Void> data,
+  int offset,
+  int size,
+  int n_copies,
+  int stride_tensor,
+  int stride_data,
 );
 
 @ffi.Native<
@@ -7164,8 +7252,13 @@ external ffi.Pointer<mtmd_context> mtmd_init_from_file(
 @ffi.Native<ffi.Void Function(ffi.Pointer<mtmd_context>)>()
 external void mtmd_free(ffi.Pointer<mtmd_context> ctx);
 
-@ffi.Native<ffi.Bool Function(ffi.Pointer<mtmd_context>)>()
-external bool mtmd_decode_use_non_causal(ffi.Pointer<mtmd_context> ctx);
+@ffi.Native<
+  ffi.Bool Function(ffi.Pointer<mtmd_context>, ffi.Pointer<mtmd_input_chunk>)
+>()
+external bool mtmd_decode_use_non_causal(
+  ffi.Pointer<mtmd_context> ctx,
+  ffi.Pointer<mtmd_input_chunk> chunk,
+);
 
 @ffi.Native<ffi.Bool Function(ffi.Pointer<mtmd_context>)>()
 external bool mtmd_decode_use_mrope(ffi.Pointer<mtmd_context> ctx);
@@ -7557,7 +7650,8 @@ enum ggml_type {
   GGML_TYPE_TQ2_0(35),
   GGML_TYPE_MXFP4(39),
   GGML_TYPE_NVFP4(40),
-  GGML_TYPE_COUNT(41);
+  GGML_TYPE_Q1_0(41),
+  GGML_TYPE_COUNT(42);
 
   final int value;
   const ggml_type(this.value);
@@ -7596,7 +7690,8 @@ enum ggml_type {
     35 => GGML_TYPE_TQ2_0,
     39 => GGML_TYPE_MXFP4,
     40 => GGML_TYPE_NVFP4,
-    41 => GGML_TYPE_COUNT,
+    41 => GGML_TYPE_Q1_0,
+    42 => GGML_TYPE_COUNT,
     _ => throw ArgumentError('Unknown value for ggml_type: $value'),
   };
 }
@@ -8096,6 +8191,7 @@ enum llama_ftype {
   LLAMA_FTYPE_MOSTLY_TQ2_0(37),
   LLAMA_FTYPE_MOSTLY_MXFP4_MOE(38),
   LLAMA_FTYPE_MOSTLY_NVFP4(39),
+  LLAMA_FTYPE_MOSTLY_Q1_0(40),
   LLAMA_FTYPE_GUESSED(1024);
 
   final int value;
@@ -8136,6 +8232,7 @@ enum llama_ftype {
     37 => LLAMA_FTYPE_MOSTLY_TQ2_0,
     38 => LLAMA_FTYPE_MOSTLY_MXFP4_MOE,
     39 => LLAMA_FTYPE_MOSTLY_NVFP4,
+    40 => LLAMA_FTYPE_MOSTLY_Q1_0,
     1024 => LLAMA_FTYPE_GUESSED,
     _ => throw ArgumentError('Unknown value for llama_ftype: $value'),
   };
@@ -8230,7 +8327,8 @@ enum llama_flash_attn_type {
 enum llama_split_mode {
   LLAMA_SPLIT_MODE_NONE(0),
   LLAMA_SPLIT_MODE_LAYER(1),
-  LLAMA_SPLIT_MODE_ROW(2);
+  LLAMA_SPLIT_MODE_ROW(2),
+  LLAMA_SPLIT_MODE_TENSOR(3);
 
   final int value;
   const llama_split_mode(this.value);
@@ -8239,6 +8337,7 @@ enum llama_split_mode {
     0 => LLAMA_SPLIT_MODE_NONE,
     1 => LLAMA_SPLIT_MODE_LAYER,
     2 => LLAMA_SPLIT_MODE_ROW,
+    3 => LLAMA_SPLIT_MODE_TENSOR,
     _ => throw ArgumentError('Unknown value for llama_split_mode: $value'),
   };
 }
@@ -9040,7 +9139,8 @@ enum ggml_ftype {
   GGML_FTYPE_MOSTLY_IQ1_M(23),
   GGML_FTYPE_MOSTLY_BF16(24),
   GGML_FTYPE_MOSTLY_MXFP4(25),
-  GGML_FTYPE_MOSTLY_NVFP4(26);
+  GGML_FTYPE_MOSTLY_NVFP4(26),
+  GGML_FTYPE_MOSTLY_Q1_0(27);
 
   final int value;
   const ggml_ftype(this.value);
@@ -9072,6 +9172,7 @@ enum ggml_ftype {
     24 => GGML_FTYPE_MOSTLY_BF16,
     25 => GGML_FTYPE_MOSTLY_MXFP4,
     26 => GGML_FTYPE_MOSTLY_NVFP4,
+    27 => GGML_FTYPE_MOSTLY_Q1_0,
     _ => throw ArgumentError('Unknown value for ggml_ftype: $value'),
   };
 }
@@ -9480,7 +9581,8 @@ enum ggml_backend_dev_type {
   GGML_BACKEND_DEVICE_TYPE_CPU(0),
   GGML_BACKEND_DEVICE_TYPE_GPU(1),
   GGML_BACKEND_DEVICE_TYPE_IGPU(2),
-  GGML_BACKEND_DEVICE_TYPE_ACCEL(3);
+  GGML_BACKEND_DEVICE_TYPE_ACCEL(3),
+  GGML_BACKEND_DEVICE_TYPE_META(4);
 
   final int value;
   const ggml_backend_dev_type(this.value);
@@ -9490,6 +9592,7 @@ enum ggml_backend_dev_type {
     1 => GGML_BACKEND_DEVICE_TYPE_GPU,
     2 => GGML_BACKEND_DEVICE_TYPE_IGPU,
     3 => GGML_BACKEND_DEVICE_TYPE_ACCEL,
+    4 => GGML_BACKEND_DEVICE_TYPE_META,
     _ => throw ArgumentError('Unknown value for ggml_backend_dev_type: $value'),
   };
 }
@@ -9529,6 +9632,20 @@ final class ggml_backend_dev_props extends ffi.Struct {
   external ggml_backend_dev_caps caps;
 }
 
+typedef ggml_backend_allreduce_tensor_tFunction =
+    ffi.Bool Function(
+      ffi.Pointer<ggml_backend_t> backends,
+      ffi.Pointer<ffi.Pointer<ggml_tensor>> tensors,
+      ffi.Size n_backends,
+    );
+typedef Dartggml_backend_allreduce_tensor_tFunction =
+    bool Function(
+      ffi.Pointer<ggml_backend_t> backends,
+      ffi.Pointer<ffi.Pointer<ggml_tensor>> tensors,
+      int n_backends,
+    );
+typedef ggml_backend_allreduce_tensor_t =
+    ffi.Pointer<ffi.NativeFunction<ggml_backend_allreduce_tensor_tFunction>>;
 typedef ggml_backend_split_buffer_type_tFunction =
     ggml_backend_buffer_type_t Function(
       ffi.Int main_device,
