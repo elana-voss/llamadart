@@ -26,6 +26,33 @@ typedef _GgmlBackendScoreNative = Int32 Function();
 typedef _GgmlBackendScoreDart = int Function();
 typedef _GgmlBackendRegisterNative = Void Function(ggml_backend_reg_t);
 typedef _GgmlBackendRegisterDart = void Function(ggml_backend_reg_t);
+typedef _GgmlBackendRegCountNative = Size Function();
+typedef _GgmlBackendRegCountDart = int Function();
+typedef _GgmlBackendRegGetNative = ggml_backend_reg_t Function(Size);
+typedef _GgmlBackendRegGetDart = ggml_backend_reg_t Function(int);
+typedef _GgmlBackendRegNameNative = Pointer<Char> Function(ggml_backend_reg_t);
+typedef _GgmlBackendRegNameDart = Pointer<Char> Function(ggml_backend_reg_t);
+typedef _GgmlBackendRegByNameNative =
+    ggml_backend_reg_t Function(Pointer<Char>);
+typedef _GgmlBackendRegByNameDart = ggml_backend_reg_t Function(Pointer<Char>);
+typedef _GgmlBackendRegDevCountNative = Size Function(ggml_backend_reg_t);
+typedef _GgmlBackendRegDevCountDart = int Function(ggml_backend_reg_t);
+typedef _GgmlBackendRegDevGetNative =
+    ggml_backend_dev_t Function(ggml_backend_reg_t, Size);
+typedef _GgmlBackendRegDevGetDart =
+    ggml_backend_dev_t Function(ggml_backend_reg_t, int);
+typedef _GgmlBackendDevCountNative = Size Function();
+typedef _GgmlBackendDevCountDart = int Function();
+typedef _GgmlBackendDevGetNative = ggml_backend_dev_t Function(Size);
+typedef _GgmlBackendDevGetDart = ggml_backend_dev_t Function(int);
+typedef _GgmlBackendDevNameNative = Pointer<Char> Function(ggml_backend_dev_t);
+typedef _GgmlBackendDevNameDart = Pointer<Char> Function(ggml_backend_dev_t);
+typedef _GgmlBackendDevBackendRegNative =
+    ggml_backend_reg_t Function(ggml_backend_dev_t);
+typedef _GgmlBackendDevBackendRegDart =
+    ggml_backend_reg_t Function(ggml_backend_dev_t);
+typedef _GgmlBackendDevByTypeNative = ggml_backend_dev_t Function(UnsignedInt);
+typedef _GgmlBackendDevByTypeDart = ggml_backend_dev_t Function(int);
 typedef _LlamaDartSetLogLevelNative = Void Function(Int32);
 typedef _LlamaDartSetLogLevelDart = void Function(int);
 typedef _MtmdDefaultMarkerNative = Pointer<Char> Function();
@@ -165,10 +192,22 @@ class LlamaCppService {
   bool _linuxRuntimeDepsPrepared = false;
   String? _linuxPreparedLibraryDirectory;
   bool _ggmlFallbackLookupAttempted = false;
+  String? _ggmlFallbackLookupSearchKey;
   _GgmlBackendLoadDart? _ggmlBackendLoadFallback;
   _GgmlBackendLoadAllDart? _ggmlBackendLoadAllFallback;
   _GgmlBackendLoadAllFromPathDart? _ggmlBackendLoadAllFromPathFallback;
   _GgmlBackendRegisterDart? _ggmlBackendRegisterFallback;
+  _GgmlBackendRegCountDart? _ggmlBackendRegCountFallback;
+  _GgmlBackendRegGetDart? _ggmlBackendRegGetFallback;
+  _GgmlBackendRegNameDart? _ggmlBackendRegNameFallback;
+  _GgmlBackendRegByNameDart? _ggmlBackendRegByNameFallback;
+  _GgmlBackendRegDevCountDart? _ggmlBackendRegDevCountFallback;
+  _GgmlBackendRegDevGetDart? _ggmlBackendRegDevGetFallback;
+  _GgmlBackendDevCountDart? _ggmlBackendDevCountFallback;
+  _GgmlBackendDevGetDart? _ggmlBackendDevGetFallback;
+  _GgmlBackendDevNameDart? _ggmlBackendDevNameFallback;
+  _GgmlBackendDevBackendRegDart? _ggmlBackendDevBackendRegFallback;
+  _GgmlBackendDevByTypeDart? _ggmlBackendDevByTypeFallback;
   bool _logLevelFallbackLookupAttempted = false;
   String? _logLevelFallbackLookupSearchKey;
   _LlamaDartSetLogLevelDart? _llamaDartSetLogLevelFallback;
@@ -457,7 +496,7 @@ class LlamaCppService {
       _tryLoadBackendModule('cpu');
     }
 
-    if (_backendRegistryOr<int>(0, ggml_backend_reg_count) == 0) {
+    if (_ggmlBackendRegCount() == 0) {
       // Fallback path: attempt to load CPU backend by filename resolution.
       _tryLoadBackendModule('cpu');
     }
@@ -1636,11 +1675,6 @@ class LlamaCppService {
   }
 
   void _resolveGgmlFallbackFunctions() {
-    if (_ggmlFallbackLookupAttempted) {
-      return;
-    }
-    _ggmlFallbackLookupAttempted = true;
-
     final fileNameCandidates = _ggmlLibraryCandidateFileNames();
     final candidates = <String>[..._ggmlAssetUriCandidates()];
     final filesystemCandidates = <String>{};
@@ -1653,6 +1687,14 @@ class LlamaCppService {
     // Keep bare-name fallback last so module-dir resolution wins when present.
     filesystemCandidates.addAll(fileNameCandidates);
     candidates.addAll(filesystemCandidates);
+
+    final searchKey = candidates.map(path.normalize).join('|');
+    if (_ggmlFallbackLookupAttempted &&
+        _ggmlFallbackLookupSearchKey == searchKey) {
+      return;
+    }
+    _ggmlFallbackLookupAttempted = true;
+    _ggmlFallbackLookupSearchKey = searchKey;
 
     final seen = <String>{};
     for (final candidate in candidates) {
@@ -1714,10 +1756,151 @@ class LlamaCppService {
         }
       }
 
+      if (_ggmlBackendRegCountFallback == null) {
+        try {
+          _ggmlBackendRegCountFallback = library
+              .lookupFunction<
+                _GgmlBackendRegCountNative,
+                _GgmlBackendRegCountDart
+              >('ggml_backend_reg_count');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendRegGetFallback == null) {
+        try {
+          _ggmlBackendRegGetFallback = library
+              .lookupFunction<_GgmlBackendRegGetNative, _GgmlBackendRegGetDart>(
+                'ggml_backend_reg_get',
+              );
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendRegNameFallback == null) {
+        try {
+          _ggmlBackendRegNameFallback = library
+              .lookupFunction<
+                _GgmlBackendRegNameNative,
+                _GgmlBackendRegNameDart
+              >('ggml_backend_reg_name');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendRegByNameFallback == null) {
+        try {
+          _ggmlBackendRegByNameFallback = library
+              .lookupFunction<
+                _GgmlBackendRegByNameNative,
+                _GgmlBackendRegByNameDart
+              >('ggml_backend_reg_by_name');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendRegDevCountFallback == null) {
+        try {
+          _ggmlBackendRegDevCountFallback = library
+              .lookupFunction<
+                _GgmlBackendRegDevCountNative,
+                _GgmlBackendRegDevCountDart
+              >('ggml_backend_reg_dev_count');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendRegDevGetFallback == null) {
+        try {
+          _ggmlBackendRegDevGetFallback = library
+              .lookupFunction<
+                _GgmlBackendRegDevGetNative,
+                _GgmlBackendRegDevGetDart
+              >('ggml_backend_reg_dev_get');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendDevCountFallback == null) {
+        try {
+          _ggmlBackendDevCountFallback = library
+              .lookupFunction<
+                _GgmlBackendDevCountNative,
+                _GgmlBackendDevCountDart
+              >('ggml_backend_dev_count');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendDevGetFallback == null) {
+        try {
+          _ggmlBackendDevGetFallback = library
+              .lookupFunction<_GgmlBackendDevGetNative, _GgmlBackendDevGetDart>(
+                'ggml_backend_dev_get',
+              );
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendDevNameFallback == null) {
+        try {
+          _ggmlBackendDevNameFallback = library
+              .lookupFunction<
+                _GgmlBackendDevNameNative,
+                _GgmlBackendDevNameDart
+              >('ggml_backend_dev_name');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendDevBackendRegFallback == null) {
+        try {
+          _ggmlBackendDevBackendRegFallback = library
+              .lookupFunction<
+                _GgmlBackendDevBackendRegNative,
+                _GgmlBackendDevBackendRegDart
+              >('ggml_backend_dev_backend_reg');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
+      if (_ggmlBackendDevByTypeFallback == null) {
+        try {
+          _ggmlBackendDevByTypeFallback = library
+              .lookupFunction<
+                _GgmlBackendDevByTypeNative,
+                _GgmlBackendDevByTypeDart
+              >('ggml_backend_dev_by_type');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
       if (_ggmlBackendLoadFallback != null &&
           _ggmlBackendLoadAllFallback != null &&
           _ggmlBackendLoadAllFromPathFallback != null &&
-          _ggmlBackendRegisterFallback != null) {
+          _ggmlBackendRegisterFallback != null &&
+          _ggmlBackendRegCountFallback != null &&
+          _ggmlBackendRegGetFallback != null &&
+          _ggmlBackendRegNameFallback != null &&
+          _ggmlBackendRegByNameFallback != null &&
+          _ggmlBackendRegDevCountFallback != null &&
+          _ggmlBackendRegDevGetFallback != null &&
+          _ggmlBackendDevCountFallback != null &&
+          _ggmlBackendDevGetFallback != null &&
+          _ggmlBackendDevNameFallback != null &&
+          _ggmlBackendDevBackendRegFallback != null &&
+          _ggmlBackendDevByTypeFallback != null) {
         return;
       }
     }
@@ -1989,16 +2172,122 @@ class LlamaCppService {
     }
   }
 
-  T _backendRegistryOr<T>(T fallback, T Function() call) {
+  T _ggmlRegistryFallbackOr<T>(
+    T fallback,
+    T Function() primaryCall,
+    T? Function() fallbackCall,
+  ) {
+    if (Platform.isWindows) {
+      // Windows split bundles can expose ggml registry state through ggml.dll
+      // while the generated default asset points at llama.dll. Prefer the
+      // explicit ggml runtime lookup when it is available so count/get/name
+      // calls all read the same registry.
+      _resolveGgmlFallbackFunctions();
+      final fallbackValue = fallbackCall();
+      if (fallbackValue != null) {
+        return fallbackValue;
+      }
+    }
+
     try {
-      return call();
+      return primaryCall();
     } on ArgumentError {
-      // Some split bundles may omit a subset of registry symbols on the
-      // primary lookup target. Treat this call as unavailable, but continue
-      // attempting other registry APIs that may still be present.
+      _resolveGgmlFallbackFunctions();
+      final fallbackValue = fallbackCall();
+      if (fallbackValue != null) {
+        return fallbackValue;
+      }
       _backendRegistrySymbolUnavailable = true;
       return fallback;
     }
+  }
+
+  int _ggmlBackendRegCount() {
+    return _ggmlRegistryFallbackOr<int>(
+      0,
+      ggml_backend_reg_count,
+      () => _ggmlBackendRegCountFallback?.call(),
+    );
+  }
+
+  ggml_backend_reg_t _ggmlBackendRegGet(int index) {
+    return _ggmlRegistryFallbackOr<ggml_backend_reg_t>(
+      nullptr,
+      () => ggml_backend_reg_get(index),
+      () => _ggmlBackendRegGetFallback?.call(index),
+    );
+  }
+
+  Pointer<Char> _ggmlBackendRegName(ggml_backend_reg_t reg) {
+    return _ggmlRegistryFallbackOr<Pointer<Char>>(
+      nullptr,
+      () => ggml_backend_reg_name(reg),
+      () => _ggmlBackendRegNameFallback?.call(reg),
+    );
+  }
+
+  ggml_backend_reg_t _ggmlBackendRegByName(Pointer<Char> name) {
+    return _ggmlRegistryFallbackOr<ggml_backend_reg_t>(
+      nullptr,
+      () => ggml_backend_reg_by_name(name),
+      () => _ggmlBackendRegByNameFallback?.call(name),
+    );
+  }
+
+  int _ggmlBackendRegDevCount(ggml_backend_reg_t reg) {
+    return _ggmlRegistryFallbackOr<int>(
+      0,
+      () => ggml_backend_reg_dev_count(reg),
+      () => _ggmlBackendRegDevCountFallback?.call(reg),
+    );
+  }
+
+  ggml_backend_dev_t _ggmlBackendRegDevGet(ggml_backend_reg_t reg, int index) {
+    return _ggmlRegistryFallbackOr<ggml_backend_dev_t>(
+      nullptr,
+      () => ggml_backend_reg_dev_get(reg, index),
+      () => _ggmlBackendRegDevGetFallback?.call(reg, index),
+    );
+  }
+
+  int _ggmlBackendDevCount() {
+    return _ggmlRegistryFallbackOr<int>(
+      0,
+      ggml_backend_dev_count,
+      () => _ggmlBackendDevCountFallback?.call(),
+    );
+  }
+
+  ggml_backend_dev_t _ggmlBackendDevGet(int index) {
+    return _ggmlRegistryFallbackOr<ggml_backend_dev_t>(
+      nullptr,
+      () => ggml_backend_dev_get(index),
+      () => _ggmlBackendDevGetFallback?.call(index),
+    );
+  }
+
+  Pointer<Char> _ggmlBackendDevName(ggml_backend_dev_t dev) {
+    return _ggmlRegistryFallbackOr<Pointer<Char>>(
+      nullptr,
+      () => ggml_backend_dev_name(dev),
+      () => _ggmlBackendDevNameFallback?.call(dev),
+    );
+  }
+
+  ggml_backend_reg_t _ggmlBackendDevBackendReg(ggml_backend_dev_t dev) {
+    return _ggmlRegistryFallbackOr<ggml_backend_reg_t>(
+      nullptr,
+      () => ggml_backend_dev_backend_reg(dev),
+      () => _ggmlBackendDevBackendRegFallback?.call(dev),
+    );
+  }
+
+  ggml_backend_dev_t _ggmlBackendDevByType(ggml_backend_dev_type type) {
+    return _ggmlRegistryFallbackOr<ggml_backend_dev_t>(
+      nullptr,
+      () => ggml_backend_dev_by_type(type),
+      () => _ggmlBackendDevByTypeFallback?.call(type.value),
+    );
   }
 
   static String _backendLibraryFileName(String backend) {
@@ -2033,19 +2322,13 @@ class LlamaCppService {
 
   String _backendDiagnostics() {
     final regs = <String>[];
-    final regCount = _backendRegistryOr<int>(0, ggml_backend_reg_count);
+    final regCount = _ggmlBackendRegCount();
     for (var i = 0; i < regCount; i++) {
-      final reg = _backendRegistryOr<ggml_backend_reg_t>(
-        nullptr,
-        () => ggml_backend_reg_get(i),
-      );
+      final reg = _ggmlBackendRegGet(i);
       if (reg == nullptr) {
         continue;
       }
-      final regNamePtr = _backendRegistryOr<Pointer<Char>>(
-        nullptr,
-        () => ggml_backend_reg_name(reg),
-      );
+      final regNamePtr = _ggmlBackendRegName(reg);
       if (regNamePtr == nullptr) {
         continue;
       }
@@ -2078,11 +2361,8 @@ class LlamaCppService {
       case GpuBackend.auto:
         return null;
       case GpuBackend.cpu:
-        final cpuDev = _backendRegistryOr<ggml_backend_dev_t>(
-          nullptr,
-          () => ggml_backend_dev_by_type(
-            ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_CPU,
-          ),
+        final cpuDev = _ggmlBackendDevByType(
+          ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_CPU,
         );
         if (cpuDev == nullptr) {
           return null;
@@ -2106,28 +2386,19 @@ class LlamaCppService {
   List<ggml_backend_dev_t>? _devicesForBackendRegName(String regName) {
     final regNamePtr = regName.toNativeUtf8();
     try {
-      final reg = _backendRegistryOr<ggml_backend_reg_t>(
-        nullptr,
-        () => ggml_backend_reg_by_name(regNamePtr.cast()),
-      );
+      final reg = _ggmlBackendRegByName(regNamePtr.cast());
       if (reg == nullptr) {
         return null;
       }
 
-      final count = _backendRegistryOr<int>(
-        0,
-        () => ggml_backend_reg_dev_count(reg),
-      );
+      final count = _ggmlBackendRegDevCount(reg);
       if (count <= 0) {
         return null;
       }
 
       final devices = <ggml_backend_dev_t>[];
       for (var i = 0; i < count; i++) {
-        final dev = _backendRegistryOr<ggml_backend_dev_t>(
-          nullptr,
-          () => ggml_backend_reg_dev_get(reg, i),
-        );
+        final dev = _ggmlBackendRegDevGet(reg, i);
         if (dev != nullptr) {
           devices.add(dev);
         }
@@ -3800,32 +4071,20 @@ class LlamaCppService {
 
   /// Returns information about currently initialized backend devices.
   List<String> getBackendInfo() {
-    final count = _backendRegistryOr<int>(0, ggml_backend_dev_count);
+    final count = _ggmlBackendDevCount();
     final devices = <String>{};
     for (var i = 0; i < count; i++) {
-      final dev = _backendRegistryOr<ggml_backend_dev_t>(
-        nullptr,
-        () => ggml_backend_dev_get(i),
-      );
+      final dev = _ggmlBackendDevGet(i);
       if (dev == nullptr) continue;
 
-      final devNamePtr = _backendRegistryOr<Pointer<Char>>(
-        nullptr,
-        () => ggml_backend_dev_name(dev),
-      );
+      final devNamePtr = _ggmlBackendDevName(dev);
       if (devNamePtr == nullptr) continue;
       final devName = devNamePtr.cast<Utf8>().toDartString();
 
       String label = devName;
-      final reg = _backendRegistryOr<ggml_backend_reg_t>(
-        nullptr,
-        () => ggml_backend_dev_backend_reg(dev),
-      );
+      final reg = _ggmlBackendDevBackendReg(dev);
       if (reg != nullptr) {
-        final regNamePtr = _backendRegistryOr<Pointer<Char>>(
-          nullptr,
-          () => ggml_backend_reg_name(reg),
-        );
+        final regNamePtr = _ggmlBackendRegName(reg);
         if (regNamePtr != nullptr) {
           final regName = regNamePtr.cast<Utf8>().toDartString();
           if (regName.toLowerCase() == devName.toLowerCase()) {

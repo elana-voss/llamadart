@@ -9,6 +9,10 @@
   * Added `ModelParams.splitMode` and wired it to llama.cpp
     `llama_model_params.split_mode`, enabling explicit single-GPU selection
     with `ModelSplitMode.none`.
+* **Windows split-bundle loader fix**:
+  * Resolved ggml backend registry/device APIs from the loaded ggml runtime DLL
+    when the generated default FFI asset cannot see those symbols, restoring
+    explicit Vulkan device selection in Windows split bundles.
 * **Compatibility note**: no public API breaking changes.
 
 ## 0.6.11
