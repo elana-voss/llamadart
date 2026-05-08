@@ -229,11 +229,13 @@ void main() {
       expect(updated.ropeFrequencyScale, isNull);
     });
 
-    test('without clear flag, passing null does NOT clear (legacy behavior)',
-        () {
-      // This documents the pre-fix behavior: null means "argument omitted".
-      final unchanged = populated.copyWith(kvUnified: null);
-      expect(unchanged.kvUnified, isTrue);
-    });
+    test(
+      'without clear flag, passing null does NOT clear (legacy behavior)',
+      () {
+        // This documents the pre-fix behavior: null means "argument omitted".
+        final unchanged = populated.copyWith(kvUnified: null);
+        expect(unchanged.kvUnified, isTrue);
+      },
+    );
   });
 }

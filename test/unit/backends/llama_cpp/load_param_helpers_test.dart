@@ -1,3 +1,6 @@
+@TestOn('vm')
+library;
+
 import 'dart:ffi';
 
 import 'package:ffi/ffi.dart';
@@ -84,20 +87,22 @@ void main() {
       }
     });
 
-    test('explicit disabled passes through unchanged for F16 (no promotion)',
-        () {
-      // The disabled+non-F16 combination is rejected by ModelParams's
-      // constructor; this helper isn't responsible for that validation.
-      // For F16/F16, disabled is legal and should pass through.
-      expect(
-        resolveFlashAttention(
-          requested: FlashAttention.disabled,
-          cacheTypeK: KvCacheType.f16,
-          cacheTypeV: KvCacheType.f16,
-        ),
-        FlashAttention.disabled,
-      );
-    });
+    test(
+      'explicit disabled passes through unchanged for F16 (no promotion)',
+      () {
+        // The disabled+non-F16 combination is rejected by ModelParams's
+        // constructor; this helper isn't responsible for that validation.
+        // For F16/F16, disabled is legal and should pass through.
+        expect(
+          resolveFlashAttention(
+            requested: FlashAttention.disabled,
+            cacheTypeK: KvCacheType.f16,
+            cacheTypeV: KvCacheType.f16,
+          ),
+          FlashAttention.disabled,
+        );
+      },
+    );
   });
 
   group('applyModelParams', () {
@@ -129,12 +134,13 @@ void main() {
       final c = calloc<llama_context_params>();
       try {
         applyContextParams(
-            c.ref,
-            ModelParams(
-              cacheTypeK: KvCacheType.q8_0,
-              cacheTypeV: KvCacheType.q4_0,
-              flashAttention: FlashAttention.enabled,
-            ));
+          c.ref,
+          ModelParams(
+            cacheTypeK: KvCacheType.q8_0,
+            cacheTypeV: KvCacheType.q4_0,
+            flashAttention: FlashAttention.enabled,
+          ),
+        );
         expect(c.ref.type_kAsInt, ggml_type.GGML_TYPE_Q8_0.value);
         expect(c.ref.type_vAsInt, ggml_type.GGML_TYPE_Q4_0.value);
       } finally {
@@ -232,11 +238,12 @@ void main() {
       final c = calloc<llama_context_params>();
       try {
         applyContextParams(
-            c.ref,
-            ModelParams(
-              ropeFrequencyBase: 500000.0,
-              ropeFrequencyScale: 0.25, // fp32-exact value
-            ));
+          c.ref,
+          ModelParams(
+            ropeFrequencyBase: 500000.0,
+            ropeFrequencyScale: 0.25, // fp32-exact value
+          ),
+        );
         expect(c.ref.rope_freq_base, 500000.0);
         expect(c.ref.rope_freq_scale, 0.25);
       } finally {
@@ -249,7 +256,9 @@ void main() {
       try {
         expect(
           applyContextParams(
-              c.ref, ModelParams(flashAttention: FlashAttention.enabled)),
+            c.ref,
+            ModelParams(flashAttention: FlashAttention.enabled),
+          ),
           FlashAttention.enabled,
         );
       } finally {

@@ -225,8 +225,9 @@ class ModelParams {
       splitMode: splitMode ?? this.splitMode,
       mainGpu: mainGpu ?? this.mainGpu,
       loras: loras ?? this.loras,
-      chatTemplate:
-          clearChatTemplate ? null : (chatTemplate ?? this.chatTemplate),
+      chatTemplate: clearChatTemplate
+          ? null
+          : (chatTemplate ?? this.chatTemplate),
       numberOfThreads: numberOfThreads ?? this.numberOfThreads,
       numberOfThreadsBatch: numberOfThreadsBatch ?? this.numberOfThreadsBatch,
       batchSize: batchSize ?? this.batchSize,

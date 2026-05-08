@@ -54,7 +54,9 @@ void applyModelParams(llama_model_params mparams, ModelParams params) {
 /// [resolveFlashAttention]. Returns the resolved [FlashAttention] so the
 /// caller can log whether a promotion occurred.
 FlashAttention applyContextParams(
-    llama_context_params ctxParams, ModelParams params) {
+  llama_context_params ctxParams,
+  ModelParams params,
+) {
   final resolvedFlashAttn = resolveFlashAttention(
     requested: params.flashAttention,
     cacheTypeK: params.cacheTypeK,
