@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 
 void main() {
   test('ModelParams defaults preserve legacy context batching behavior', () {
-    const params = ModelParams();
+    final params = ModelParams();
 
     expect(params.contextSize, 4096);
     expect(params.gpuLayers, ModelParams.maxGpuLayers);
@@ -31,7 +31,7 @@ void main() {
   });
 
   test('ModelParams copyWith updates selected fields', () {
-    const params = ModelParams(contextSize: 1024);
+    final params = ModelParams(contextSize: 1024);
     final updated = params.copyWith(
       gpuLayers: 2,
       preferredBackend: GpuBackend.metal,
@@ -53,7 +53,7 @@ void main() {
   });
 
   test('ModelParams exposes load-time tuning knobs', () {
-    const params = ModelParams(
+    final params = ModelParams(
       useMmap: false,
       useMlock: true,
       flashAttention: FlashAttention.enabled,
@@ -75,7 +75,7 @@ void main() {
   });
 
   test('ModelParams copyWith updates load-time tuning knobs', () {
-    const params = ModelParams();
+    final params = ModelParams();
     final updated = params.copyWith(
       useMmap: false,
       useMlock: true,
@@ -98,7 +98,7 @@ void main() {
   });
 
   test('ModelParams copyWith preserves unspecified fields', () {
-    const original = ModelParams(
+    final original = ModelParams(
       contextSize: 3072,
       gpuLayers: 8,
       preferredBackend: GpuBackend.cuda,
@@ -141,5 +141,114 @@ void main() {
     expect(updated.kvUnified, isTrue);
     expect(updated.ropeFrequencyBase, 1000000.0);
     expect(updated.ropeFrequencyScale, 0.5);
+  });
+
+  group('non-F16 KV requires flash attention', () {
+    test('q8_0 K + flashAttention disabled throws ArgumentError', () {
+      expect(
+        () => ModelParams(
+          cacheTypeK: KvCacheType.q8_0,
+          flashAttention: FlashAttention.disabled,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('q4_0 V + flashAttention disabled throws ArgumentError', () {
+      expect(
+        () => ModelParams(
+          cacheTypeV: KvCacheType.q4_0,
+          flashAttention: FlashAttention.disabled,
+        ),
+        throwsArgumentError,
+      );
+    });
+
+    test('q8_0 K/V + flashAttention auto is allowed (auto-promote handles it)',
+        () {
+      // The service-side auto-promote turns this into FA=enabled at load.
+      // Construction is fine.
+      expect(
+        () => ModelParams(
+          cacheTypeK: KvCacheType.q8_0,
+          cacheTypeV: KvCacheType.q8_0,
+          flashAttention: FlashAttention.auto,
+        ),
+        returnsNormally,
+      );
+    });
+
+    test('q8_0 K/V + flashAttention enabled is allowed', () {
+      expect(
+        () => ModelParams(
+          cacheTypeK: KvCacheType.q8_0,
+          cacheTypeV: KvCacheType.q8_0,
+          flashAttention: FlashAttention.enabled,
+        ),
+        returnsNormally,
+      );
+    });
+
+    test('F16 K/V + flashAttention disabled is allowed', () {
+      expect(
+        () => ModelParams(
+          flashAttention: FlashAttention.disabled,
+        ),
+        returnsNormally,
+      );
+    });
+  });
+
+  group('copyWith can clear nullable fields back to null', () {
+    final populated = ModelParams(
+      chatTemplate: 'custom-template',
+      kvUnified: true,
+      ropeFrequencyBase: 1000000.0,
+      ropeFrequencyScale: 0.5,
+    );
+
+    test('clearChatTemplate: true sets chatTemplate to null', () {
+      final cleared = populated.copyWith(clearChatTemplate: true);
+      expect(cleared.chatTemplate, isNull);
+      // Other fields preserved.
+      expect(cleared.kvUnified, isTrue);
+      expect(cleared.ropeFrequencyBase, 1000000.0);
+    });
+
+    test('clearKvUnified: true sets kvUnified to null', () {
+      final cleared = populated.copyWith(clearKvUnified: true);
+      expect(cleared.kvUnified, isNull);
+      expect(cleared.chatTemplate, 'custom-template');
+    });
+
+    test('clearRopeFrequencyBase: true sets ropeFrequencyBase to null', () {
+      final cleared = populated.copyWith(clearRopeFrequencyBase: true);
+      expect(cleared.ropeFrequencyBase, isNull);
+      expect(cleared.ropeFrequencyScale, 0.5);
+    });
+
+    test('clearRopeFrequencyScale: true sets ropeFrequencyScale to null', () {
+      final cleared = populated.copyWith(clearRopeFrequencyScale: true);
+      expect(cleared.ropeFrequencyScale, isNull);
+      expect(cleared.ropeFrequencyBase, 1000000.0);
+    });
+
+    test('clear* flags can be combined with new value setters', () {
+      final updated = populated.copyWith(
+        clearKvUnified: true,
+        ropeFrequencyBase: 2000000.0,
+        clearRopeFrequencyScale: true,
+      );
+      expect(updated.kvUnified, isNull);
+      expect(updated.ropeFrequencyBase, 2000000.0);
+      expect(updated.ropeFrequencyScale, isNull);
+    });
+
+    test('without clear flag, passing null does NOT clear (legacy behavior)',
+        () {
+      // This documents the pre-fix behavior: null means "argument omitted".
+      final unchanged = populated.copyWith(kvUnified: null);
+      expect(unchanged.kvUnified, isTrue);
+    });
   });
 }

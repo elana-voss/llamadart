@@ -144,7 +144,7 @@ class ModelParams {
   static const int maxGpuLayers = 999;
 
   /// Creates configuration for the model.
-  const ModelParams({
+  ModelParams({
     this.contextSize = 4096,
     this.gpuLayers = maxGpuLayers,
     this.preferredBackend = GpuBackend.auto,
@@ -165,9 +165,27 @@ class ModelParams {
     this.kvUnified,
     this.ropeFrequencyBase,
     this.ropeFrequencyScale,
-  });
+  }) {
+    // llama.cpp rejects non-F16 KV cache types unless flash attention is on.
+    // Validate here so callers get an early Dart-side error instead of a
+    // cryptic native runtime failure.
+    if ((cacheTypeK != KvCacheType.f16 || cacheTypeV != KvCacheType.f16) &&
+        flashAttention == FlashAttention.disabled) {
+      throw ArgumentError(
+        'Non-F16 KV cache (cacheTypeK=$cacheTypeK, cacheTypeV=$cacheTypeV) '
+        'requires flashAttention != disabled. Either set flashAttention to '
+        'auto/enabled or use KvCacheType.f16 for both.',
+      );
+    }
+  }
 
   /// Creates a copy of this [ModelParams] with updated fields.
+  ///
+  /// Nullable fields ([chatTemplate], [kvUnified], [ropeFrequencyBase],
+  /// [ropeFrequencyScale]) use a sentinel pattern so callers can
+  /// **explicitly clear them back to null** by passing the corresponding
+  /// `clear*: true` flag. Without the sentinel, `null` would be
+  /// indistinguishable from "argument omitted, keep current value".
   ModelParams copyWith({
     int? contextSize,
     int? gpuLayers,
@@ -176,6 +194,7 @@ class ModelParams {
     int? mainGpu,
     List<LoraAdapterConfig>? loras,
     String? chatTemplate,
+    bool clearChatTemplate = false,
     int? numberOfThreads,
     int? numberOfThreadsBatch,
     int? batchSize,
@@ -187,8 +206,11 @@ class ModelParams {
     KvCacheType? cacheTypeK,
     KvCacheType? cacheTypeV,
     bool? kvUnified,
+    bool clearKvUnified = false,
     double? ropeFrequencyBase,
+    bool clearRopeFrequencyBase = false,
     double? ropeFrequencyScale,
+    bool clearRopeFrequencyScale = false,
   }) {
     return ModelParams(
       contextSize: contextSize ?? this.contextSize,
@@ -197,7 +219,8 @@ class ModelParams {
       splitMode: splitMode ?? this.splitMode,
       mainGpu: mainGpu ?? this.mainGpu,
       loras: loras ?? this.loras,
-      chatTemplate: chatTemplate ?? this.chatTemplate,
+      chatTemplate:
+          clearChatTemplate ? null : (chatTemplate ?? this.chatTemplate),
       numberOfThreads: numberOfThreads ?? this.numberOfThreads,
       numberOfThreadsBatch: numberOfThreadsBatch ?? this.numberOfThreadsBatch,
       batchSize: batchSize ?? this.batchSize,
@@ -208,9 +231,13 @@ class ModelParams {
       flashAttention: flashAttention ?? this.flashAttention,
       cacheTypeK: cacheTypeK ?? this.cacheTypeK,
       cacheTypeV: cacheTypeV ?? this.cacheTypeV,
-      kvUnified: kvUnified ?? this.kvUnified,
-      ropeFrequencyBase: ropeFrequencyBase ?? this.ropeFrequencyBase,
-      ropeFrequencyScale: ropeFrequencyScale ?? this.ropeFrequencyScale,
+      kvUnified: clearKvUnified ? null : (kvUnified ?? this.kvUnified),
+      ropeFrequencyBase: clearRopeFrequencyBase
+          ? null
+          : (ropeFrequencyBase ?? this.ropeFrequencyBase),
+      ropeFrequencyScale: clearRopeFrequencyScale
+          ? null
+          : (ropeFrequencyScale ?? this.ropeFrequencyScale),
     );
   }
 }
