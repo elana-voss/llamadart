@@ -9,6 +9,7 @@ import 'package:web/web.dart';
 
 import '../../core/models/chat/content_part.dart';
 import '../../core/models/config/gpu_backend.dart';
+import '../../core/models/config/llama_cpp_param_values.dart';
 import '../../core/models/config/log_level.dart';
 import '../../core/models/inference/generation_params.dart';
 import '../../core/models/inference/model_params.dart';
@@ -615,6 +616,20 @@ class WebGpuLlamaBackend
     return (nBatch: tunedBatch, nUbatch: tunedUbatch);
   }
 
+  int _webGpuFlashAttentionValue(ModelParams params) {
+    return llamaFlashAttentionTypeValueFor(
+      resolveFlashAttention(
+        requested: params.flashAttention,
+        cacheTypeK: params.cacheTypeK,
+        cacheTypeV: params.cacheTypeV,
+      ),
+    );
+  }
+
+  bool? _webGpuKvUnifiedValue(ModelParams params) {
+    return params.kvUnified ?? (params.maxParallelSequences > 1 ? true : null);
+  }
+
   int _resolveSafeRequestedGpuLayers({
     required String url,
     required ModelParams params,
@@ -815,6 +830,7 @@ class WebGpuLlamaBackend
     ModelParams params, {
     Function(double progress)? onProgress,
   }) async {
+    params.validate();
     _preferMemory64Override = null;
     _forceRemoteFetchBackendOverride = null;
 
@@ -931,6 +947,15 @@ class WebGpuLlamaBackend
                 ? params.microBatchSize
                 : batchTuning.nUbatch,
             nGpuLayers: attempt.gpuLayers,
+            nSeqMax: math.max(1, params.maxParallelSequences),
+            flashAttention: _webGpuFlashAttentionValue(params),
+            cacheTypeK: ggmlTypeValueFor(params.cacheTypeK),
+            cacheTypeV: ggmlTypeValueFor(params.cacheTypeV),
+            kvUnified: _webGpuKvUnifiedValue(params),
+            ropeFrequencyBase: params.ropeFrequencyBase,
+            ropeFrequencyScale: params.ropeFrequencyScale,
+            splitMode: params.splitMode.llamaCppValue,
+            mainGpu: params.mainGpu,
             useCache: true,
             forceRemoteFetchBackend: forceRemoteFetchBackend,
             remoteFetchChunkBytes: remoteFetchChunkBytesOverride,

@@ -25,6 +25,30 @@ dart pub global run coverage:format_coverage --lcov --in=coverage/test --out=cov
 dart run tool/testing/check_lcov_threshold.dart coverage/lcov.info 70
 ```
 
+### Local Chat App Web E2E
+Use the real chat app path for WebGPU bridge validation after bridge/runtime
+updates. This catches issues that direct bridge probes miss.
+
+```bash
+cd example/chat_app
+flutter build web --base-href=/example/chat_app/build/web/
+cd ../..
+python3 tool/testing/serve_static_with_headers.py --directory . --port 7358
+
+.venv-playwright/bin/python tool/testing/playwright_chat_app_real_model_smoke.py \
+  http://127.0.0.1:7358/example/chat_app/build/web/ \
+  --model-url http://127.0.0.1:7358/example/llamadart_server/models/Qwen3.5-0.8B-Q4_K_M.gguf \
+  --expect 4
+```
+
+When serving `build/web` under a repo-root path, build with the matching
+`--base-href`; otherwise Flutter resolves `flutter_bootstrap.js` and
+`webgpu_bridge/*` from `/`. On macOS headless Chromium, use the smoke script's
+default `--browser-angle auto` or pass `--browser-angle metal`; without Metal
+ANGLE the adapter may lack `shader-f16` and llama.cpp can abort in
+`ggml-webgpu` even for CPU/gpuLayers=0 runs. For larger models such as Gemma 4,
+pass `--mem64` and a smaller `--context-size` to keep the smoke bounded.
+
 ### CI Standards
 - `dart format --output=none --set-exit-if-changed .` checks formatting
 - `dart analyze` runs the linter

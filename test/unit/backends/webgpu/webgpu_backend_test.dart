@@ -24,6 +24,15 @@ void main() {
     int? lastRequestedThreadsBatch;
     int? lastRequestedBatchSize;
     int? lastRequestedMicroBatchSize;
+    int? lastRequestedSeqMax;
+    int? lastRequestedFlashAttention;
+    int? lastRequestedCacheTypeK;
+    int? lastRequestedCacheTypeV;
+    bool? lastRequestedKvUnified;
+    double? lastRequestedRopeFrequencyBase;
+    double? lastRequestedRopeFrequencyScale;
+    int? lastRequestedSplitMode;
+    int? lastRequestedMainGpu;
     int? lastMediaMaxPredict;
     int? lastMediaMaxImagePixels;
     int? lastMediaMaxImageEdge;
@@ -68,6 +77,15 @@ void main() {
       lastRequestedThreadsBatch = null;
       lastRequestedBatchSize = null;
       lastRequestedMicroBatchSize = null;
+      lastRequestedSeqMax = null;
+      lastRequestedFlashAttention = null;
+      lastRequestedCacheTypeK = null;
+      lastRequestedCacheTypeV = null;
+      lastRequestedKvUnified = null;
+      lastRequestedRopeFrequencyBase = null;
+      lastRequestedRopeFrequencyScale = null;
+      lastRequestedSplitMode = null;
+      lastRequestedMainGpu = null;
       lastMediaMaxPredict = null;
       lastMediaMaxImagePixels = null;
       lastMediaMaxImageEdge = null;
@@ -107,6 +125,58 @@ void main() {
             final nUbatch = config.getProperty('nUbatch'.toJS);
             if (nUbatch.isA<JSNumber>()) {
               lastRequestedMicroBatchSize = (nUbatch as JSNumber).toDartInt;
+            }
+
+            final nSeqMax = config.getProperty('nSeqMax'.toJS);
+            if (nSeqMax.isA<JSNumber>()) {
+              lastRequestedSeqMax = (nSeqMax as JSNumber).toDartInt;
+            }
+
+            final flashAttention = config.getProperty('flashAttention'.toJS);
+            if (flashAttention.isA<JSNumber>()) {
+              lastRequestedFlashAttention =
+                  (flashAttention as JSNumber).toDartInt;
+            }
+
+            final cacheTypeK = config.getProperty('cacheTypeK'.toJS);
+            if (cacheTypeK.isA<JSNumber>()) {
+              lastRequestedCacheTypeK = (cacheTypeK as JSNumber).toDartInt;
+            }
+
+            final cacheTypeV = config.getProperty('cacheTypeV'.toJS);
+            if (cacheTypeV.isA<JSNumber>()) {
+              lastRequestedCacheTypeV = (cacheTypeV as JSNumber).toDartInt;
+            }
+
+            final kvUnified = config.getProperty('kvUnified'.toJS);
+            if (kvUnified.isA<JSBoolean>()) {
+              lastRequestedKvUnified = (kvUnified as JSBoolean).toDart;
+            }
+
+            final ropeFrequencyBase = config.getProperty(
+              'ropeFrequencyBase'.toJS,
+            );
+            if (ropeFrequencyBase.isA<JSNumber>()) {
+              lastRequestedRopeFrequencyBase =
+                  (ropeFrequencyBase as JSNumber).toDartDouble;
+            }
+
+            final ropeFrequencyScale = config.getProperty(
+              'ropeFrequencyScale'.toJS,
+            );
+            if (ropeFrequencyScale.isA<JSNumber>()) {
+              lastRequestedRopeFrequencyScale =
+                  (ropeFrequencyScale as JSNumber).toDartDouble;
+            }
+
+            final splitMode = config.getProperty('splitMode'.toJS);
+            if (splitMode.isA<JSNumber>()) {
+              lastRequestedSplitMode = (splitMode as JSNumber).toDartInt;
+            }
+
+            final mainGpu = config.getProperty('mainGpu'.toJS);
+            if (mainGpu.isA<JSNumber>()) {
+              lastRequestedMainGpu = (mainGpu as JSNumber).toDartInt;
             }
           }
 
@@ -379,6 +449,56 @@ void main() {
       expect(lastRequestedThreadsBatch, 3);
       expect(lastRequestedBatchSize, 768);
       expect(lastRequestedMicroBatchSize, 384);
+    });
+
+    test('forwards native-compatible load tuning params', () async {
+      await backend.modelLoadFromUrl(
+        'https://example.com/model.gguf',
+        const ModelParams(
+          maxParallelSequences: 4,
+          flashAttention: FlashAttention.auto,
+          cacheTypeK: KvCacheType.q8_0,
+          cacheTypeV: KvCacheType.q4_0,
+          kvUnified: false,
+          ropeFrequencyBase: 1000000,
+          ropeFrequencyScale: 0.5,
+          splitMode: ModelSplitMode.none,
+          mainGpu: 2,
+        ),
+      );
+
+      expect(lastRequestedSeqMax, 4);
+      expect(lastRequestedFlashAttention, 1);
+      expect(lastRequestedCacheTypeK, 8);
+      expect(lastRequestedCacheTypeV, 2);
+      expect(lastRequestedKvUnified, isFalse);
+      expect(lastRequestedRopeFrequencyBase, 1000000.0);
+      expect(lastRequestedRopeFrequencyScale, 0.5);
+      expect(lastRequestedSplitMode, 0);
+      expect(lastRequestedMainGpu, 2);
+    });
+
+    test('auto-enables unified KV for multiple web sequence slots', () async {
+      await backend.modelLoadFromUrl(
+        'https://example.com/model.gguf',
+        const ModelParams(maxParallelSequences: 3),
+      );
+
+      expect(lastRequestedSeqMax, 3);
+      expect(lastRequestedKvUnified, isTrue);
+    });
+
+    test('validates KV cache and flash attention combinations', () async {
+      await expectLater(
+        backend.modelLoadFromUrl(
+          'https://example.com/model.gguf',
+          const ModelParams(
+            flashAttention: FlashAttention.disabled,
+            cacheTypeK: KvCacheType.q8_0,
+          ),
+        ),
+        throwsArgumentError,
+      );
     });
 
     test('applies qwen3.5-0.8b batch tuning when unset', () async {

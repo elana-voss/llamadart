@@ -4,41 +4,18 @@
 
 import '../../core/models/config/flash_attention.dart';
 import '../../core/models/config/kv_cache_type.dart';
+import '../../core/models/config/llama_cpp_param_values.dart'
+    as llama_cpp_values;
 import '../../core/models/inference/model_params.dart';
 import 'bindings.dart';
+
+export '../../core/models/config/llama_cpp_param_values.dart'
+    show resolveFlashAttention;
 
 /// Maps llamadart's [KvCacheType] enum to llama.cpp's `ggml_type`. Pure
 /// switch, no side effects.
 ggml_type ggmlTypeFor(KvCacheType type) {
-  switch (type) {
-    case KvCacheType.f16:
-      return ggml_type.GGML_TYPE_F16;
-    case KvCacheType.q8_0:
-      return ggml_type.GGML_TYPE_Q8_0;
-    case KvCacheType.q4_0:
-      return ggml_type.GGML_TYPE_Q4_0;
-  }
-}
-
-/// Resolves the user-requested [FlashAttention] given the requested KV
-/// cache types. llama.cpp refuses non-F16 KV without flash attention, so
-/// `auto` is auto-promoted to `enabled` when either KV type isn't F16.
-/// Explicit `enabled` / `disabled` are passed through unchanged.
-///
-/// Pairing this with [ModelParams]'s constructor-side ArgumentError on
-/// `(non-F16 KV, FA disabled)` ensures the only ambiguous case (`auto`)
-/// gets resolved deterministically here.
-FlashAttention resolveFlashAttention({
-  required FlashAttention requested,
-  required KvCacheType cacheTypeK,
-  required KvCacheType cacheTypeV,
-}) {
-  final wantsKvQuantization =
-      cacheTypeK != KvCacheType.f16 || cacheTypeV != KvCacheType.f16;
-  if (requested == FlashAttention.auto && wantsKvQuantization) {
-    return FlashAttention.enabled;
-  }
-  return requested;
+  return ggml_type.fromValue(llama_cpp_values.ggmlTypeValueFor(type));
 }
 
 /// Applies the user-controlled fields of [params] to a freshly-defaulted
@@ -57,7 +34,7 @@ FlashAttention applyContextParams(
   llama_context_params ctxParams,
   ModelParams params,
 ) {
-  final resolvedFlashAttn = resolveFlashAttention(
+  final resolvedFlashAttn = llama_cpp_values.resolveFlashAttention(
     requested: params.flashAttention,
     cacheTypeK: params.cacheTypeK,
     cacheTypeV: params.cacheTypeV,

@@ -3,6 +3,12 @@
 * **Native runtime sync**:
   * Updated native hook pinning to `leehack/llamadart-native@b9016`,
     picking up the CUDA 12.8 Blackwell-capable native bundles.
+  * Updated default web bridge asset pinning to
+    `leehack/llama-web-bridge-assets@v0.1.13` (llama.cpp `b9016`) so
+    native and web runtimes track the same upstream revision.
+  * Picked up the bridge-side Qwen UTF-8 streaming stabilization and
+    multimodal fallback narrowing, while preserving control-token output for
+    parser consumers.
 * **Load-time tuning knobs**:
   * Added `ModelParams.useMmap` (default `true`) and
     `ModelParams.useMlock` (default `false`), wired to
@@ -28,6 +34,9 @@
     `ModelParams.ropeFrequencyScale` (both nullable) for
     context-extension overrides on `llama_context_params.rope_freq_base` /
     `rope_freq_scale`. `null` keeps the model's trained values.
+  * Forwarded native-compatible `ModelParams` load tuning knobs through the
+    WebGPU bridge path, including `maxParallelSequences`, flash attention,
+    KV-cache type, KV-unified, RoPE, split-mode, and main-GPU options.
 * **GPU device selection API**:
   * Added `ModelParams.mainGpu` and wired it to llama.cpp
     `llama_model_params.main_gpu`.

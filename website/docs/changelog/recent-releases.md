@@ -9,6 +9,14 @@ For canonical full release notes, use:
 
 ## Unreleased
 
+- Synced default WebGPU bridge asset pinning to
+  `leehack/llama-web-bridge-assets@v0.1.13` (llama.cpp `b9016`) to match the
+  native runtime pin.
+- Picked up bridge-side Qwen UTF-8 streaming stabilization and multimodal
+  fallback narrowing while preserving control-token output for parser consumers.
+- Forwarded native-compatible `ModelParams` load tuning knobs through the
+  WebGPU bridge path, including sequence slots, flash attention, KV cache type,
+  RoPE overrides, split mode, and main GPU.
 - Filtered backend-owned runtime dependencies during native asset bundling so
   CUDA runtime DLLs and OpenBLAS runtime libraries are emitted only when their
   owning backend module is selected, while unknown runtime libraries stay
