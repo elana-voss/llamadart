@@ -3873,6 +3873,76 @@ class LlamaCppService {
     return utf8.decode(bytes, allowMalformed: true);
   }
 
+  /// Persists the KV-cache state of [contextHandle] to [path] together
+  /// with the producing token sequence so a later [stateLoadFile] can
+  /// resume inference without paying the prompt-eval cost again.
+  ///
+  /// Wraps `llama_state_save_file`. Returns true on success.
+  bool stateSaveFile(int contextHandle, String path, List<int> tokens) {
+    final ctx = _contexts[contextHandle];
+    if (ctx == null) return false;
+    final pathPtr = path.toNativeUtf8();
+    final tokensPtr = tokens.isEmpty ? nullptr : malloc<Int32>(tokens.length);
+    try {
+      for (int i = 0; i < tokens.length; i++) {
+        tokensPtr[i] = tokens[i];
+      }
+      return llama_state_save_file(
+        ctx.pointer,
+        pathPtr.cast(),
+        tokensPtr,
+        tokens.length,
+      );
+    } finally {
+      malloc.free(pathPtr);
+      if (tokensPtr != nullptr) malloc.free(tokensPtr);
+    }
+  }
+
+  /// Restores a previously saved KV-cache state into [contextHandle].
+  /// [tokenCapacity] caps the number of tokens read back.
+  ///
+  /// Wraps `llama_state_load_file`. Throws on failure (corrupt file,
+  /// schema mismatch, etc.).
+  List<int> stateLoadFile(int contextHandle, String path, int tokenCapacity) {
+    final ctx = _contexts[contextHandle];
+    if (ctx == null) {
+      throw StateError('Unknown context handle: $contextHandle');
+    }
+    if (tokenCapacity <= 0) {
+      throw ArgumentError.value(
+        tokenCapacity,
+        'tokenCapacity',
+        'must be positive',
+      );
+    }
+    final pathPtr = path.toNativeUtf8();
+    final tokensPtr = malloc<Int32>(tokenCapacity);
+    final countPtr = malloc<Size>();
+    try {
+      countPtr.value = 0;
+      final ok = llama_state_load_file(
+        ctx.pointer,
+        pathPtr.cast(),
+        tokensPtr,
+        tokenCapacity,
+        countPtr,
+      );
+      if (!ok) {
+        throw StateError(
+          'llama_state_load_file failed for "$path" '
+          '(corrupt file, version mismatch, or capacity too small)',
+        );
+      }
+      final actual = countPtr.value;
+      return List<int>.generate(actual, (i) => tokensPtr[i]);
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(tokensPtr);
+      malloc.free(countPtr);
+    }
+  }
+
   /// Returns metadata for the specified [modelHandle].
   Map<String, String> getMetadata(int modelHandle) {
     final model = _models[modelHandle];

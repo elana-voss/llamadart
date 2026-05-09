@@ -45,7 +45,9 @@ export 'src/backends/backend.dart'
         BackendPerfContextData,
         BackendPerformanceDiagnostics,
         BackendEmbeddings,
-        BackendBatchEmbeddings;
+        BackendBatchEmbeddings,
+        BackendStatePersistence,
+        StateLoadResult;
 
 // Models - Inference
 export 'src/core/models/inference/model_params.dart';
