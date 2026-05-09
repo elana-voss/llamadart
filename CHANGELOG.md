@@ -1,4 +1,4 @@
-## Unreleased
+## 0.6.12
 
 * **Native runtime sync**:
   * Updated native hook pinning to `leehack/llamadart-native@b9016`,
@@ -56,7 +56,7 @@
     owning backend module is selected.
   * Kept unknown non-core runtime libraries bundled for compatibility with
     future native bundle layouts.
-* **Compatibility note**: no public API breaking changes.
+* **Compatibility note**: no public API breaking changes in `0.6.12`.
 
 ## 0.6.11
 

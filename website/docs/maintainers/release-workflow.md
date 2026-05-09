@@ -22,6 +22,9 @@ Ensure migration/changelog docs reflect behavior in the release branch.
 
 - Update `pubspec.yaml` version.
 - Update `CHANGELOG.md`.
+- Move accumulated `Unreleased` entries into the new version section; remove
+  the `Unreleased` heading when it would otherwise be empty. Add it back only
+  when the next unreleased change is documented.
 - Update `MIGRATION.md` if breaking behavior changed.
 - Keep docs pages aligned with new defaults/options.
 

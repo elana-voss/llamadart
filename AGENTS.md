@@ -228,6 +228,13 @@ To refresh local pinned bridge assets for `example/chat_app/web`:
 WEBGPU_BRIDGE_ASSETS_TAG=<tag> ./scripts/fetch_webgpu_bridge_assets.sh
 ```
 
+### Preparing Releases
+- When cutting a release, move accumulated `CHANGELOG.md` and
+  `website/docs/changelog/recent-releases.md` entries from `Unreleased` into
+  the new version section.
+- Do not leave an empty `Unreleased` section in committed release prep. Add
+  `Unreleased` back only when the next unreleased change is documented.
+
 ### Adding New Features
 1. Create public API in appropriate `lib/src/` subdirectory
 2. Export via `lib/src/api/llamadart.dart` if part of public API
