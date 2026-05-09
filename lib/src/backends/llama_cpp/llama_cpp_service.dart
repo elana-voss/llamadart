@@ -325,36 +325,13 @@ class LlamaCppService {
 
   /// Resolves effective context batch parameters.
   ///
-  /// Legacy behavior is preserved when [ModelParams.batchSize] and
-  /// [ModelParams.microBatchSize] are not set:
-  ///
-  /// - `n_batch = n_ctx`
-  /// - `n_ubatch = n_batch`
-  ///
-  /// Values are clamped to safe bounds so `n_ubatch <= n_batch <= n_ctx`.
+  /// Uses the shared non-FFI helper so native and WebGPU batch semantics stay
+  /// in sync.
   static ({int batchSize, int microBatchSize}) resolveContextBatchSizes(
     ModelParams modelParams,
     int contextSize,
   ) {
-    final effectiveContextSize = contextSize > 0 ? contextSize : 1;
-
-    final configuredBatchSize = modelParams.batchSize > 0
-        ? modelParams.batchSize
-        : effectiveContextSize;
-    final cappedBatchSize = configuredBatchSize > effectiveContextSize
-        ? effectiveContextSize
-        : configuredBatchSize;
-    final batchSize = cappedBatchSize > 0 ? cappedBatchSize : 1;
-
-    final configuredMicroBatchSize = modelParams.microBatchSize > 0
-        ? modelParams.microBatchSize
-        : batchSize;
-    final cappedMicroBatchSize = configuredMicroBatchSize > batchSize
-        ? batchSize
-        : configuredMicroBatchSize;
-    final microBatchSize = cappedMicroBatchSize > 0 ? cappedMicroBatchSize : 1;
-
-    return (batchSize: batchSize, microBatchSize: microBatchSize);
+    return resolveModelContextBatchSizes(modelParams, contextSize);
   }
 
   /// Resolves whether multimodal projector init should use GPU.

@@ -248,3 +248,37 @@ class ModelParams {
     );
   }
 }
+
+/// Resolves llama.cpp-compatible context batch parameters.
+///
+/// Preserves native defaults when [ModelParams.batchSize] and
+/// [ModelParams.microBatchSize] are unset:
+///
+/// - `n_batch = n_ctx`
+/// - `n_ubatch = n_batch`
+///
+/// Values are clamped to safe bounds so `n_ubatch <= n_batch <= n_ctx`.
+({int batchSize, int microBatchSize}) resolveModelContextBatchSizes(
+  ModelParams modelParams,
+  int contextSize,
+) {
+  final effectiveContextSize = contextSize > 0 ? contextSize : 1;
+
+  final configuredBatchSize = modelParams.batchSize > 0
+      ? modelParams.batchSize
+      : effectiveContextSize;
+  final cappedBatchSize = configuredBatchSize > effectiveContextSize
+      ? effectiveContextSize
+      : configuredBatchSize;
+  final batchSize = cappedBatchSize > 0 ? cappedBatchSize : 1;
+
+  final configuredMicroBatchSize = modelParams.microBatchSize > 0
+      ? modelParams.microBatchSize
+      : batchSize;
+  final cappedMicroBatchSize = configuredMicroBatchSize > batchSize
+      ? batchSize
+      : configuredMicroBatchSize;
+  final microBatchSize = cappedMicroBatchSize > 0 ? cappedMicroBatchSize : 1;
+
+  return (batchSize: batchSize, microBatchSize: microBatchSize);
+}
