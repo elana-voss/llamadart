@@ -4,11 +4,14 @@
   * Updated native hook pinning to `leehack/llamadart-native@b9016`,
     picking up the CUDA 12.8 Blackwell-capable native bundles.
   * Updated default web bridge asset pinning to
-    `leehack/llama-web-bridge-assets@v0.1.13` (llama.cpp `b9016`) so
+    `leehack/llama-web-bridge-assets@v0.1.14` (llama.cpp `b9016`) so
     native and web runtimes track the same upstream revision.
   * Picked up the bridge-side Qwen UTF-8 streaming stabilization and
     multimodal fallback narrowing, while preserving control-token output for
     parser consumers.
+  * Picked up the bridge-side BERT embedding thread-pool sizing fix so
+    automatic thread selection does not exceed the compiled WebAssembly
+    pthread pool.
 * **Load-time tuning knobs**:
   * Added `ModelParams.useMmap` (default `true`) and
     `ModelParams.useMlock` (default `false`), wired to

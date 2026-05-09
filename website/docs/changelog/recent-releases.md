@@ -10,10 +10,12 @@ For canonical full release notes, use:
 ## Unreleased
 
 - Synced default WebGPU bridge asset pinning to
-  `leehack/llama-web-bridge-assets@v0.1.13` (llama.cpp `b9016`) to match the
+  `leehack/llama-web-bridge-assets@v0.1.14` (llama.cpp `b9016`) to match the
   native runtime pin.
 - Picked up bridge-side Qwen UTF-8 streaming stabilization and multimodal
   fallback narrowing while preserving control-token output for parser consumers.
+- Picked up the bridge-side BERT embedding thread-pool sizing fix so automatic
+  thread selection does not exceed the compiled WebAssembly pthread pool.
 - Forwarded native-compatible `ModelParams` load tuning knobs through the
   WebGPU bridge path, including sequence slots, flash attention, KV cache type,
   RoPE overrides, split mode, and main GPU.

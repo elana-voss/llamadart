@@ -21,7 +21,7 @@ development validation, and CDN-first loading for normal hosted deployments:
 Fetch pinned local assets with:
 
 ```bash
-WEBGPU_BRIDGE_ASSETS_TAG=v0.1.13 ./scripts/fetch_webgpu_bridge_assets.sh
+WEBGPU_BRIDGE_ASSETS_TAG=v0.1.14 ./scripts/fetch_webgpu_bridge_assets.sh
 ```
 
 ## Compatibility and safeguards
@@ -32,6 +32,9 @@ WEBGPU_BRIDGE_ASSETS_TAG=v0.1.13 ./scripts/fetch_webgpu_bridge_assets.sh
   RoPE overrides, split mode, and main GPU.
 - `v0.1.13+` bridge assets keep control-token output available for parser
   consumers while narrowing multimodal CPU fallback to recovery paths.
+- `v0.1.14+` bridge assets cap automatically selected WebAssembly threads to
+  the compiled pthread pool size, preventing BERT-style embedding models from
+  aborting on hosts with higher hardware concurrency than the bridge pool.
 - CPU fallback is available through bridge runtime routing.
 - Safari compatibility guard and fallback behavior are integrated in this repo.
 - Legacy bridge assets may be forced to CPU in Safari when GPU layers are
@@ -50,7 +53,7 @@ You can override bridge asset source/version before loader startup:
 ```html
 <script>
   window.__llamadartBridgeAssetsRepo = 'leehack/llama-web-bridge-assets';
-  window.__llamadartBridgeAssetsTag = 'v0.1.13';
+  window.__llamadartBridgeAssetsTag = 'v0.1.14';
   // Optional knobs:
   // window.__llamadartBridgeEnableMem64 = false;
   // window.__llamadartBridgeAllowAutoRemoteFetchBackend = false;
