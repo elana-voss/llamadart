@@ -73,56 +73,68 @@ void main() async {
     expect(loaded.tokens, isEmpty);
   });
 
-  test('generate after stateLoadFile reuses KV prefix, not full prompt eval', () async {
-    const prompt = 'Once upon a time in a land far away';
+  test(
+    'generate after stateLoadFile reuses KV prefix, not full prompt eval',
+    () async {
+      const prompt = 'Once upon a time in a land far away';
 
-    // Evaluate the prompt into the KV cache via a short generation.
-    await engine
-        .generate(
-          prompt,
-          params: const GenerationParams(
-            maxTokens: 3,
-            reusePromptPrefix: true,
-          ),
-        )
-        .drain<void>();
-    final fullPerf = await engine.getPerformanceContext();
-    final fullEvalTokens = fullPerf?.promptEvalTokens ?? 0;
-    expect(
-      fullEvalTokens,
-      greaterThan(0),
-      reason: 'first generate must evaluate the prompt',
-    );
+      // Evaluate the prompt into the KV cache via a short generation.
+      final tokens = await engine.tokenize(prompt);
+      await engine
+          .generate(
+            prompt,
+            params: const GenerationParams(
+              maxTokens: 3,
+              reusePromptPrefix: true,
+            ),
+          )
+          .drain<void>();
+      final fullPerf = await engine.getPerformanceContext();
+      final fullEvalTokens = fullPerf?.promptEvalTokens ?? 0;
+      expect(
+        fullEvalTokens,
+        greaterThan(1),
+        reason: 'first generate must evaluate the prompt',
+      );
 
-    // Save the KV state together with the producing token sequence.
-    final tokens = await engine.tokenize(prompt);
-    final savePath = '${tmpDir.path}/kv_reuse.bin';
-    expect(await engine.stateSaveFile(savePath, tokens: tokens), isTrue);
+      // Save the KV state together with the producing token sequence.
+      final savePath = '${tmpDir.path}/kv_reuse.bin';
+      expect(await engine.stateSaveFile(savePath, tokens: tokens), isTrue);
 
-    // Load the state — this must seed cachedPromptTokens.
-    final loadResult = await engine.stateLoadFile(savePath, tokenCapacity: 512);
-    expect(loadResult.tokens, equals(tokens));
+      // Load the state — this must seed cachedPromptTokens.
+      final loadResult = await engine.stateLoadFile(
+        savePath,
+        tokenCapacity: 512,
+      );
+      expect(loadResult.tokens, equals(tokens));
 
-    // Generate with the same prompt again.  If cachedPromptTokens was seeded
-    // correctly the KV prefix is already in place and only the empty suffix
-    // (zero tokens) should be evaluated, not the full prompt again.
-    await engine
-        .generate(
-          prompt,
-          params: const GenerationParams(
-            maxTokens: 3,
-            reusePromptPrefix: true,
-          ),
-        )
-        .drain<void>();
-    final cachedPerf = await engine.getPerformanceContext();
-    final cachedEvalTokens = cachedPerf?.promptEvalTokens ?? fullEvalTokens;
+      // Generate with prompt + a short suffix.  If cachedPromptTokens was
+      // seeded correctly the KV prefix is already in place and only the suffix
+      // tokens are evaluated, not the full prompt.  We use the native
+      // n_p_eval counter (returned when > 0) which reflects the actual decode
+      // count for this call; the Dart fallback always returns the full prompt
+      // length so we need at least one suffix token to get a native reading.
+      const suffix = ' and they';
+      await engine
+          .generate(
+            prompt + suffix,
+            params: const GenerationParams(
+              maxTokens: 3,
+              reusePromptPrefix: true,
+            ),
+          )
+          .drain<void>();
+      final cachedPerf = await engine.getPerformanceContext();
+      final cachedEvalTokens = cachedPerf?.promptEvalTokens ?? fullEvalTokens;
 
-    expect(
-      cachedEvalTokens,
-      lessThan(fullEvalTokens),
-      reason:
-          'generate after stateLoadFile should reuse the KV prefix and not re-evaluate the full prompt',
-    );
-  });
+      // Only the suffix tokens should have been evaluated (not the full prompt).
+      expect(
+        cachedEvalTokens,
+        lessThan(fullEvalTokens),
+        reason:
+            'generate after stateLoadFile should reuse the KV prefix; '
+            'only suffix tokens should be evaluated, not the full prompt',
+      );
+    },
+  );
 }
