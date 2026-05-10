@@ -232,6 +232,7 @@ class LlamaCppService {
   final Map<int, Map<String, double>> _activeLoras = {};
   final Map<int, String> _modelBackendNames = <int, String>{};
   final Map<int, int> _modelResolvedGpuLayers = <int, int>{};
+  final Set<int> _generatingContexts = {};
 
   // Mapping: modelHandle -> mtmdContextHandle
   final Map<int, int> _modelToMtmd = {};
@@ -2559,6 +2560,7 @@ class LlamaCppService {
   }) async* {
     var ctx = _contexts[contextHandle];
     if (ctx == null) throw Exception("Invalid context handle");
+    _generatingContexts.add(contextHandle);
 
     final modelHandle = _contextToModel[contextHandle]!;
     final model = _models[modelHandle]!;
@@ -2657,6 +2659,7 @@ class LlamaCppService {
 
       llama_sampler_free(sampler);
     } finally {
+      _generatingContexts.remove(contextHandle);
       malloc.free(tokensPtr);
       malloc.free(pieceBuf);
       if (grammarPtr != nullptr) malloc.free(grammarPtr);
@@ -3858,6 +3861,11 @@ class LlamaCppService {
   bool stateSaveFile(int contextHandle, String path, List<int> tokens) {
     final ctx = _contexts[contextHandle];
     if (ctx == null) return false;
+    if (_generatingContexts.contains(contextHandle)) {
+      throw StateError(
+        'Cannot save state while generation is active on context $contextHandle',
+      );
+    }
     final pathPtr = path.toNativeUtf8();
     final tokensPtr = tokens.isEmpty ? nullptr : malloc<Int32>(tokens.length);
     try {
@@ -3886,6 +3894,11 @@ class LlamaCppService {
     if (ctx == null) {
       throw StateError('Unknown context handle: $contextHandle');
     }
+    if (_generatingContexts.contains(contextHandle)) {
+      throw StateError(
+        'Cannot load state while generation is active on context $contextHandle',
+      );
+    }
     if (tokenCapacity <= 0) {
       throw ArgumentError.value(
         tokenCapacity,
@@ -3912,7 +3925,9 @@ class LlamaCppService {
         );
       }
       final actual = countPtr.value;
-      return List<int>.generate(actual, (i) => tokensPtr[i]);
+      final loaded = List<int>.generate(actual, (i) => tokensPtr[i]);
+      ctx.cachedPromptTokens = loaded;
+      return loaded;
     } finally {
       malloc.free(pathPtr);
       malloc.free(tokensPtr);
