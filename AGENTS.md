@@ -91,6 +91,15 @@ pass `--mem64` and a smaller `--context-size` to keep the smoke bounded.
 - Parameter and return types documented
 - No TODO/FIXME comments in committed code
 
+### Changelog Discipline
+- Never add unreleased work to an already-published version section in
+  `CHANGELOG.md` or `website/docs/changelog/recent-releases.md`.
+- Before editing release notes, check the top of `CHANGELOG.md`. If the latest
+  section is a concrete released version (for example `## 0.6.12`), create a
+  new `## Unreleased` section above it and place new PR entries there.
+- Only move entries from `## Unreleased` into a numbered version section as part
+  of an explicit release/version-bump task.
+
 ### Error Handling
 - Use custom `LlamaException` hierarchy (defined in `lib/src/core/exceptions.dart`)
 - Subtypes: `LlamaModelException`, `LlamaContextException`, `LlamaInferenceException`, `LlamaStateException`, `LlamaUnsupportedException`

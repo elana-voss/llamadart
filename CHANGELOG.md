@@ -1,4 +1,4 @@
-## 0.6.12
+## Unreleased
 
 * **Model source download/cache manager**:
   * Added `ModelSource` for local paths, HTTP(S) URLs, and Hugging Face
@@ -18,6 +18,11 @@
     backends when available.
   * Migrated server/testing helpers away from ad-hoc model downloads so examples
     dogfood the package-managed cache manager.
+* **Compatibility note**: no public API breaking changes; the model source APIs
+  are additive and existing `loadModel(...)` callers are unchanged.
+
+## 0.6.12
+
 * **Native runtime sync**:
   * Updated native hook pinning to `leehack/llamadart-native@b9016`,
     picking up the CUDA 12.8 Blackwell-capable native bundles.
@@ -78,8 +83,7 @@
     owning backend module is selected.
   * Kept unknown non-core runtime libraries bundled for compatibility with
     future native bundle layouts.
-* **Compatibility note**: no public API breaking changes in `0.6.12`; the model
-  source APIs are additive and existing `loadModel(...)` callers are unchanged.
+* **Compatibility note**: no public API breaking changes in `0.6.12`.
 
 ## 0.6.11
 

@@ -7,7 +7,7 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
-## 0.6.12
+## Unreleased
 
 - Added package-managed model source downloads and cache management:
   `ModelSource`, `ModelLoadOptions`, `ModelCachePolicy`, resolver targets,
@@ -22,6 +22,11 @@ For canonical full release notes, use:
   existing native loader, remote HTTP(S)/Hugging Face sources download through
   the package-managed native cache before local loading, and URL-capable web
   backends keep using direct URL loading for simple unauthenticated requests.
+- Compatibility note: no public API breaking changes; existing
+  `loadModel(...)` callers are unchanged.
+
+## 0.6.12
+
 - Synced default WebGPU bridge asset pinning to
   `leehack/llama-web-bridge-assets@v0.1.14` (llama.cpp `b9016`) to match the
   native runtime pin.
@@ -40,8 +45,7 @@ For canonical full release notes, use:
   CUDA runtime DLLs and OpenBLAS runtime libraries are emitted only when their
   owning backend module is selected, while unknown runtime libraries stay
   bundled for forward compatibility.
-- Compatibility note: no public API breaking changes in `0.6.12`; existing
-  `loadModel(...)` callers are unchanged.
+- Compatibility note: no public API breaking changes in `0.6.12`.
 
 ## 0.6.11
 
