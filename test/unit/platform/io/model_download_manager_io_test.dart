@@ -181,6 +181,23 @@ void main() {
       expect(await manager.list(cacheDirectory: customCacheDirectory), isEmpty);
     });
 
+    test('prune removes stale metadata entries with missing files', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      server.payload = utf8.encode('stale-cache-model');
+      final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+      final entry = await manager.ensureModel(source);
+      final cacheDir = Directory(path.dirname(entry.filePath));
+      await File(entry.filePath).delete();
+
+      final pruned = await manager.prune();
+
+      expect(pruned.single.cacheKey, source.cacheKey);
+      expect(await cacheDir.exists(), isFalse);
+      expect(await manager.list(), isEmpty);
+    });
+
     test(
       'ignores metadata whose file path points outside its cache entry',
       () async {
@@ -613,6 +630,34 @@ void main() {
 
         expect(server.lastRange, 'bytes=13-');
         expect(server.lastIfRange, server.etag);
+        expect(File(entry.filePath).readAsStringSync(), 'fresh-content');
+      },
+    );
+
+    test(
+      'restarts stale partial downloads when resume validators mismatch',
+      () async {
+        final manager = DefaultModelDownloadManager(
+          defaultCacheDirectory: tempDir.path,
+        );
+        final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+        server.payload = utf8.encode('fresh-content');
+        server.supportRanges = true;
+        server.etag = '"new-etag"';
+        final cacheDir = Directory(
+          path.join(tempDir.path, source.cacheDirectoryName),
+        )..createSync(recursive: true);
+        File(
+          path.join(cacheDir.path, 'tiny.gguf.part'),
+        ).writeAsStringSync('stale');
+        File(path.join(cacheDir.path, 'tiny.gguf.part.json')).writeAsStringSync(
+          '${jsonEncode(<String, Object?>{'etag': '"old-etag"'})}\n',
+        );
+
+        final entry = await manager.ensureModel(source);
+
+        expect(server.requestCount, 2);
+        expect(server.lastRange, isNull);
         expect(File(entry.filePath).readAsStringSync(), 'fresh-content');
       },
     );

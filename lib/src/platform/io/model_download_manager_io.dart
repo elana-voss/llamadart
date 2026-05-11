@@ -169,7 +169,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     String? cacheDirectory,
   }) async {
     final entries = await list(cacheDirectory: cacheDirectory);
-    final removed = <ModelCacheEntry>[];
+    final removed = await _removeStaleMetadataEntries(cacheDirectory);
     final now = DateTime.now().toUtc();
 
     for (final entry in entries) {
@@ -427,8 +427,24 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       final append =
           existingBytes > 0 && statusCode == HttpStatus.partialContent;
       if (existingBytes > 0 && statusCode == HttpStatus.partialContent) {
-        _validateContentRange(response, existingBytes, source);
-        _validateResumeValidator(partMetadata, responsePartMetadata, source);
+        try {
+          _validateContentRange(response, existingBytes, source);
+          _validateResumeValidator(partMetadata, responsePartMetadata, source);
+        } on LlamaModelException {
+          await response.drain<void>();
+          await _deleteIfExists(downloadFile);
+          if (partMetadataFile != null) {
+            await _deleteIfExists(partMetadataFile);
+          }
+          return _downloadOnce(
+            source,
+            options,
+            uri,
+            finalFile,
+            partFile,
+            onProgress,
+          );
+        }
       } else if (existingBytes > 0 && statusCode == HttpStatus.ok) {
         existingBytes = 0;
         await _deleteIfExists(downloadFile);
@@ -555,6 +571,42 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       '${const JsonEncoder.withIndent('  ').convert(json)}\n',
     );
     await _replaceFile(tempFile, metadataFile);
+  }
+
+  Future<List<ModelCacheEntry>> _removeStaleMetadataEntries(
+    String? cacheDirectory,
+  ) async {
+    final root = _rootDirectory(cacheDirectory);
+    if (!await root.exists()) {
+      return const <ModelCacheEntry>[];
+    }
+
+    final removed = <ModelCacheEntry>[];
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! Directory) {
+        continue;
+      }
+      final metadataFile = File(path.join(entity.path, _metadataFileName));
+      if (!await metadataFile.exists()) {
+        continue;
+      }
+      try {
+        final entry = await _readMetadata(metadataFile);
+        final entryFile = _entryFileInCacheDirectory(entry, entity);
+        if (entryFile != null && !await entryFile.exists()) {
+          if (await _removeCacheDirectory(
+            entity,
+            cacheDirectory: cacheDirectory,
+          )) {
+            removed.add(entry);
+          }
+        }
+      } catch (_) {
+        // Ignore malformed cache entries so one corrupt metadata file does not
+        // make cache pruning unusable.
+      }
+    }
+    return removed;
   }
 
   Future<List<ModelCacheEntry>> _removeByCacheKey(
