@@ -206,9 +206,12 @@ abstract class BackendBatchEmbeddings extends BackendEmbeddings {
 }
 
 /// Result of [BackendStatePersistence.stateLoadFile]. Contains the token
-/// sequence the saved state was produced from. Callers should re-feed
-/// these tokens to the chat session so its in-Dart history matches the
-/// restored KV cache.
+/// sequence saved alongside the native KV-cache state.
+///
+/// Loading restores the native KV cache only. Callers using higher-level
+/// chat abstractions must persist and reconstruct their chat message
+/// history separately; these raw token IDs are exposed mainly for
+/// diagnostics and raw-prompt callers.
 class StateLoadResult {
   /// The token IDs that the saved state was produced from.
   final List<int> tokens;
@@ -219,10 +222,12 @@ class StateLoadResult {
 
 /// Optional backend capability for persisting the KV cache to disk and
 /// restoring it later, mirroring `llama_state_save_file` /
-/// `llama_state_load_file` in llama.cpp. Saving captures the entire
+/// `llama_state_load_file` in llama.cpp. Saving captures the native
 /// runtime state of [contextHandle] together with the token sequence
-/// that produced it; loading restores both, skipping the prompt-eval
-/// pass on subsequent inference rounds.
+/// that produced it. Loading restores the native KV cache and returns
+/// the saved token sequence; subsequent inference can skip prompt
+/// evaluation when callers re-issue a prompt with the restored token
+/// prefix and prompt-prefix reuse enabled.
 abstract class BackendStatePersistence {
   /// Writes the KV cache state of [contextHandle] together with the
   /// token sequence in [tokens] to [path]. The file format is the one
