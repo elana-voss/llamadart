@@ -1291,10 +1291,14 @@ class LlamaEngine {
   }
 
   Object _redactedErrorDetails(Object error) {
-    return error.toString().replaceAllMapped(
+    final message = error.toString().replaceAllMapped(
       RegExp(r'https?://[^\s)]+'),
       (match) => _redactedUriForLogs(match.group(0)!),
     );
+    return <String, Object?>{
+      'type': error.runtimeType.toString(),
+      'message': message,
+    };
   }
 
   int? _firstNonWhitespaceIndex(String value) {

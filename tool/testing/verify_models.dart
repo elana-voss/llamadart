@@ -208,7 +208,11 @@ Future<void> main(List<String> args) async {
     print('================================================================');
 
     if (!file.existsSync()) {
-      print('Model not found at legacy path: $legacyFilePath');
+      print(
+        cachedEntry == null
+            ? 'Model not found at legacy path: $legacyFilePath'
+            : 'Model not found at cached path: $filePath',
+      );
       print('Downloading...');
       try {
         filePath = await _ensureModel(

@@ -514,6 +514,26 @@ void main() {
         expect(thrown.toString(), isNot(contains('secret')));
         expect(thrown.toString(), isNot(contains('token=abc123')));
         expect(thrown.toString(), contains('https://example.com/model.gguf'));
+        final exception = thrown as LlamaModelException;
+        expect(
+          exception.details,
+          isA<Map<String, Object?>>()
+              .having(
+                (details) => details['type'].toString(),
+                'type',
+                contains('Exception'),
+              )
+              .having(
+                (details) => details['message'].toString(),
+                'message',
+                contains('url model load failed'),
+              )
+              .having(
+                (details) => details['message'].toString(),
+                'redacted message',
+                isNot(anyOf(contains('secret'), contains('token=abc123'))),
+              ),
+        );
       },
     );
 
