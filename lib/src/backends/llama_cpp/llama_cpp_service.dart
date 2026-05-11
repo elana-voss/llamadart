@@ -3953,6 +3953,15 @@ class LlamaCppService {
         );
       }
       final actual = countPtr.value;
+      // Defensive bounds check: llama_state_load_file should never write
+      // more tokens than tokenCapacity, but an explicit guard prevents OOB
+      // reads if the native contract changes in a future build.
+      if (actual > tokenCapacity) {
+        throw StateError(
+          'llama_state_load_file returned actual=$actual '
+          'exceeding capacity=$tokenCapacity',
+        );
+      }
       final loaded = List<int>.generate(actual, (i) => tokensPtr[i]);
       ctx.cachedPromptTokens = loaded;
       return loaded;
