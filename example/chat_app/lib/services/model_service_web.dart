@@ -81,11 +81,11 @@ class ModelServiceWeb implements ModelService {
       return;
     }
     final remoteModelSource = modelSource as RemoteModelAssetSource;
-    final mmprojSource = model.multimodalProjectorSource;
-    final hasMmproj = mmprojSource is RemoteModelAssetSource;
-    final stageCount = hasMmproj ? 2 : 1;
+    final mmprojUrl =
+        (model.multimodalProjectorSource as RemoteModelAssetSource?)?.url;
+    final stageCount = mmprojUrl == null ? 1 : 2;
     final aggregate = ModelDownloadProgressTracker(
-      includeMmproj: hasMmproj,
+      includeMmproj: mmprojUrl != null,
       providedTotalBytes: model.sizeBytes > 0 ? model.sizeBytes : null,
     );
     final bridge = _tryCreateBridge();
@@ -116,10 +116,10 @@ class ModelServiceWeb implements ModelService {
             onProgressDetail: onProgressDetail,
           );
 
-          if (hasMmproj) {
+          if (mmprojUrl != null) {
             await _prefetchStage(
               bridge,
-              mmprojSource.url,
+              mmprojUrl,
               stage: ModelDownloadStage.multimodalProjector,
               stageIndex: 2,
               stageCount: stageCount,
@@ -151,9 +151,9 @@ class ModelServiceWeb implements ModelService {
           onProgressDetail: onProgressDetail,
         );
 
-        if (hasMmproj) {
+        if (mmprojUrl != null) {
           await _verifyRemoteStage(
-            mmprojSource.url,
+            mmprojUrl,
             stage: ModelDownloadStage.multimodalProjector,
             stageIndex: 2,
             stageCount: stageCount,
