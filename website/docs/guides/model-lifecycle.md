@@ -118,8 +118,10 @@ await manager.clear();
 
 Downloaded files are written to `.part` files and promoted to the completed
 model path only after the HTTP stream and optional SHA-256 verification succeed.
-Retry/resume use HTTP Range when possible; if a server ignores a resume request
-and returns `200 OK`, the manager restarts from byte zero. Signed URL query
+Retry/resume use HTTP Range only when the partial file has a safe validator
+(ETag/Last-Modified) or the caller supplied a SHA-256 checksum; validator-less
+partials restart from byte zero. If a server ignores a resume request and
+returns `200 OK`, the manager also restarts from byte zero. Signed URL query
 strings, fragments, and userinfo are redacted from display strings and metadata.
 
 ### Mobile large-download guidance
@@ -129,9 +131,10 @@ strategy (for example an application-support or documents directory selected by
 `path_provider`). Surface progress/cancel controls in the UI, keep downloads
 serialized for large GGUF files, and expect OS backgrounding to interrupt active
 requests. The `.part` resume support lets a later foreground session continue
-when the server supports Range requests. On Android, prefer app-private storage
-unless the app intentionally exposes model files to the user; on iOS, avoid
-cache directories that the OS may purge while a model is still needed.
+when the server supports Range requests and exposes a safe validator or the
+caller supplies SHA-256. On Android, prefer app-private storage unless the app
+intentionally exposes model files to the user; on iOS, avoid cache directories
+that the OS may purge while a model is still needed.
 
 ## Multimodal projector lifecycle
 

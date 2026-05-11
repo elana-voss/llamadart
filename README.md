@@ -118,8 +118,11 @@ Future<void> main() async {
 ```
 
 Native/file-backed backends stream remote models into the package-managed cache,
-resume partial `.part` downloads when the server supports HTTP Range, verify
-optional SHA-256 checksums, and redact signed URL credentials from metadata.
+resume partial `.part` downloads when the server supports HTTP Range and the
+partial has a safe validator (ETag/Last-Modified) or caller-provided SHA-256,
+verify optional SHA-256 checksums, and redact signed URL credentials from
+metadata. Validator-less partial files restart from byte zero instead of being
+appended.
 
 ### 6. Generate embeddings
 
