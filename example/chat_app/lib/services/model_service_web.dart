@@ -32,8 +32,9 @@ class ModelServiceWeb implements ModelService {
   ) async {
     final prefs = await SharedPreferences.getInstance();
     final downloaded = prefs.getStringList(_downloadedModelsKey) ?? const [];
+    final downloadedSet = downloaded.toSet();
     return models
-        .where((model) => _isProfileCached(model, downloaded.toSet()))
+        .where((model) => _isProfileCached(model, downloadedSet))
         .map((model) => model.filename)
         .toSet();
   }

@@ -113,7 +113,9 @@ final manager = DefaultModelDownloadManager(
 
 final cached = await manager.list();
 final entry = await manager.get(ModelSource.parse('hf://owner/repo/model.gguf').cacheKey);
-await manager.remove(entry!.cacheKey);
+if (entry != null) {
+  await manager.remove(entry.cacheKey);
+}
 await manager.prune(maxAge: const Duration(days: 30), maxBytes: 20 * 1024 * 1024 * 1024);
 await manager.clear();
 ```

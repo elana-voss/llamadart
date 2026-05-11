@@ -6,12 +6,16 @@ import 'package:path/path.dart' as path;
 /// Resolves a model path or downloads a model URL into local cache.
 class ModelService {
   /// Creates a model service with optional custom [cacheDir].
-  ModelService([String? cacheDir])
-    : cacheDir = cacheDir ?? path.join(Directory.current.path, 'models'),
+  ModelService([String? cacheDir]) : this._(cacheDir ?? _defaultCacheDir());
+
+  ModelService._(String resolvedCacheDir)
+    : cacheDir = resolvedCacheDir,
       _downloadManager = DefaultModelDownloadManager(
-        defaultCacheDirectory:
-            cacheDir ?? path.join(Directory.current.path, 'models'),
+        defaultCacheDirectory: resolvedCacheDir,
       );
+
+  static String _defaultCacheDir() =>
+      path.join(Directory.current.path, 'models');
 
   /// Directory where downloaded model files are cached.
   final String cacheDir;
