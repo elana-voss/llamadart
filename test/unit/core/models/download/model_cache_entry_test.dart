@@ -171,6 +171,8 @@ void main() {
         '',
         '/cache/../model.gguf',
         '/cache/%2e%2e/model.gguf',
+        '/cache/%2e%2e%2fmodel.gguf',
+        r'C:\cache\..\model.gguf',
       ]) {
         expect(
           () => ModelCacheEntry(

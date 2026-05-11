@@ -211,9 +211,11 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     final root = Directory(options.cacheDirectory ?? defaultCacheDirectory);
     await root.create(recursive: true);
     final timestamp = DateTime.now().toUtc().microsecondsSinceEpoch;
-    return Directory(
+    final directory = Directory(
       path.join(root.path, '${source.cacheDirectoryName}-nocache-$timestamp'),
-    )..createSync(recursive: true);
+    );
+    await directory.create(recursive: true);
+    return directory;
   }
 
   Future<ModelCacheEntry> _localEntry(

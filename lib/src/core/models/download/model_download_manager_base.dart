@@ -173,7 +173,8 @@ abstract interface class ModelDownloadManager {
     ModelDownloadProgressCallback? onProgress,
   });
 
-  /// Lists all known cached model entries.
+  /// Lists all known package-managed cache entries, including transient
+  /// `noCache` entries that remain until explicitly cleared or pruned.
   Future<List<ModelCacheEntry>> list();
 
   /// Gets a cached model entry by [cacheKey], if present.
@@ -182,10 +183,12 @@ abstract interface class ModelDownloadManager {
   /// Removes a cached model entry by [cacheKey].
   Future<void> remove(String cacheKey);
 
-  /// Clears all package-managed cached model entries.
+  /// Clears all package-managed cached model entries, including transient
+  /// `noCache` entries.
   Future<void> clear();
 
-  /// Prunes cached model entries and returns removed entries.
+  /// Prunes cached model entries, including transient `noCache` entries, and
+  /// returns removed entries.
   Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes});
 }
 
@@ -299,7 +302,7 @@ String _validatedCacheFileName(String fileName) {
       decoded == '.' ||
       decoded == '..' ||
       decoded.contains('/') ||
-      decoded.contains(r'\')) {
+      decoded.contains('\\')) {
     throw ArgumentError.value(
       fileName,
       'fileName',
@@ -317,8 +320,9 @@ String _validatedCacheFilePath(String filePath) {
       'Cache filePath must not be empty.',
     );
   }
-  final normalized = filePath.replaceAll(r'\', '/');
-  for (final segment in normalized.split('/')) {
+  final normalized = filePath.replaceAll('\\', '/');
+  final decodedPath = Uri.decodeComponent(normalized).replaceAll('\\', '/');
+  for (final segment in decodedPath.split('/')) {
     if (segment.isEmpty) {
       continue;
     }

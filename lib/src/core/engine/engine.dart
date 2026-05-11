@@ -271,10 +271,13 @@ class LlamaEngine {
 
       LlamaLogger.instance.error(
         'Failed to load model $modelName from URL $redactedUrl',
-        null,
+        _redactedErrorDetails(e),
         stackTrace,
       );
-      throw LlamaModelException('Failed to load model from $redactedUrl');
+      throw LlamaModelException(
+        'Failed to load model from $redactedUrl',
+        _redactedErrorDetails(e),
+      );
     }
   }
 
@@ -1285,6 +1288,13 @@ class LlamaEngine {
       port: uri.hasPort ? uri.port : null,
       path: uri.path,
     ).toString();
+  }
+
+  Object _redactedErrorDetails(Object error) {
+    return error.toString().replaceAllMapped(
+      RegExp(r'https?://[^\s)]+'),
+      (match) => _redactedUriForLogs(match.group(0)!),
+    );
   }
 
   int? _firstNonWhitespaceIndex(String value) {

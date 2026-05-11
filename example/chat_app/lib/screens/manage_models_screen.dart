@@ -5,7 +5,7 @@ import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:llamadart/llamadart.dart';
+import 'package:llamadart/llamadart.dart' hide ModelDownloadProgress;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
