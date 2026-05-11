@@ -203,15 +203,13 @@ class LlamaEngine {
             'Explicit local model paths are not supported by URL-loading backends.',
           );
         }
-        if (source.isLocal) {
-          final entry = await modelDownloadManager.ensureModel(
-            source,
-            options: options,
-            onProgress: onProgress,
-          );
-          return loadModel(entry.filePath, modelParams: modelParams);
-        }
-        return loadModel(path, modelParams: modelParams);
+        final localSource = ModelSource.path(path);
+        final entry = await modelDownloadManager.ensureModel(
+          localSource,
+          options: options,
+          onProgress: onProgress,
+        );
+        return loadModel(entry.filePath, modelParams: modelParams);
       case RemoteModelUrl(:final url, :final useBrowserCache):
         if (!useBrowserCache) {
           throw LlamaUnsupportedException(

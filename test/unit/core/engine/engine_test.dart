@@ -408,9 +408,42 @@ void main() {
         await nativeEngine.loadModelSource(source, options: options);
 
         expect(downloadManager.ensureModelCalls, 1);
-        expect(downloadManager.lastSource, source);
+        expect(downloadManager.lastSource?.path, source.path);
+        expect(downloadManager.lastSource?.cacheKey, source.cacheKey);
         expect(downloadManager.lastOptions, same(options));
         expect(nativeBackend.lastModelPath, '/models/model.gguf');
+      },
+    );
+
+    test(
+      'native loadModelSource honors resolver-provided local path',
+      () async {
+        final source = ModelSource.path('/models/original.gguf');
+        final resolvedSource = ModelSource.path('/models/resolved.gguf');
+        final entry = ModelCacheEntry(
+          sourceCanonicalKey: resolvedSource.metadataSourceKey,
+          cacheKey: resolvedSource.cacheKey,
+          fileName: resolvedSource.fileName,
+          filePath: '/models/resolved.gguf',
+          createdAt: DateTime.utc(2026),
+          updatedAt: DateTime.utc(2026),
+        );
+        final resolver = MockModelResolver(
+          const LocalModelFile('/models/resolved.gguf'),
+        );
+        final downloadManager = MockModelDownloadManager(entry);
+        final nativeBackend = MockLlamaBackend();
+        final nativeEngine = LlamaEngine(
+          nativeBackend,
+          modelResolver: resolver,
+          modelDownloadManager: downloadManager,
+        );
+
+        await nativeEngine.loadModelSource(source);
+
+        expect(resolver.lastSource, source);
+        expect(downloadManager.lastSource?.path, '/models/resolved.gguf');
+        expect(nativeBackend.lastModelPath, '/models/resolved.gguf');
       },
     );
 

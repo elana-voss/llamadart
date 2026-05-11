@@ -309,13 +309,19 @@ int? _optionalInt(Object? value) {
 }
 
 String _metadataSafeSourceKey(String sourceCanonicalKey, String cacheKey) {
-  final candidate = sourceCanonicalKey.startsWith('url:')
-      ? sourceCanonicalKey.substring('url:'.length).split('#').first
+  final isUrlKey = sourceCanonicalKey.startsWith('url:');
+  final candidate = isUrlKey
+      ? sourceCanonicalKey
+            .substring('url:'.length)
+            .split('#')
+            .first
+            .split(RegExp(r'\s'))
+            .first
       : sourceCanonicalKey;
 
   final uri = Uri.tryParse(candidate);
   if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
-    return sourceCanonicalKey;
+    return isUrlKey ? 'url:<redacted>#cacheKey=$cacheKey' : sourceCanonicalKey;
   }
 
   final redactedUri = Uri(

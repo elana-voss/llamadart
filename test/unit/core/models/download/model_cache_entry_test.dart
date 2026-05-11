@@ -142,6 +142,28 @@ void main() {
       );
     });
 
+    test('toJson redacts url canonical keys with explicit file names', () {
+      final entry = ModelCacheEntry(
+        sourceCanonicalKey:
+            'url:https://user:secret@host/model.gguf?token=secret\nfileName:model.gguf',
+        cacheKey: 'abc123',
+        fileName: 'model.gguf',
+        filePath: '/cache/model.gguf',
+        createdAt: DateTime.utc(2026, 1, 2),
+        updatedAt: DateTime.utc(2026, 1, 2),
+      );
+
+      final encoded = jsonEncode(entry.toJson());
+
+      expect(encoded, isNot(contains('secret')));
+      expect(encoded, isNot(contains('token=secret')));
+      expect(encoded, isNot(contains('fileName:model.gguf')));
+      expect(
+        entry.sourceCanonicalKey,
+        'url:https://host/model.gguf#cacheKey=abc123',
+      );
+    });
+
     test('normalizes percent-encoded cache file names and paths', () {
       final entry = ModelCacheEntry(
         sourceCanonicalKey: 'path:/models/model.gguf',
