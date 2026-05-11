@@ -238,7 +238,7 @@ ModelSource _parseHuggingFaceUri(String value) {
             'Hugging Face file path contains an empty segment.',
           );
         }
-        final decodedSegment = Uri.decodeComponent(segment);
+        final decodedSegment = _decodeHuggingFacePathSegment(segment, value);
         if (decodedSegment.contains('/') || decodedSegment.contains('\\')) {
           throw ArgumentError.value(
             value,
@@ -274,6 +274,18 @@ String _validateRepoId(String repoId) {
     _validateRepoSegment(part, repoId);
   }
   return repoId;
+}
+
+String _decodeHuggingFacePathSegment(String segment, String value) {
+  try {
+    return Uri.decodeComponent(segment);
+  } on FormatException catch (error) {
+    throw ArgumentError.value(
+      value,
+      'value',
+      'Hugging Face file path contains invalid percent-encoding: ${error.message}',
+    );
+  }
 }
 
 void _validateRepoSegment(String segment, String repoId) {

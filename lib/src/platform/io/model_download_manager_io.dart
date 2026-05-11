@@ -106,7 +106,8 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       }
       try {
         final entry = await _readMetadata(metadataFile);
-        if (await File(entry.filePath).exists()) {
+        final entryFile = _entryFileInCacheDirectory(entry, entity);
+        if (entryFile != null && await entryFile.exists()) {
           entries.add(entry);
         }
       } catch (_) {
@@ -130,7 +131,13 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     )) {
       try {
         final entry = await _readMetadata(metadataFile);
-        if (entry.cacheKey == cacheKey && await File(entry.filePath).exists()) {
+        final entryFile = _entryFileInCacheDirectory(
+          entry,
+          metadataFile.parent,
+        );
+        if (entry.cacheKey == cacheKey &&
+            entryFile != null &&
+            await entryFile.exists()) {
           entries.add(entry);
         }
       } catch (_) {
@@ -167,7 +174,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
 
     for (final entry in entries) {
       if (maxAge != null && now.difference(entry.updatedAt.toUtc()) > maxAge) {
-        if (await _removeEntry(entry)) {
+        if (await _removeEntry(entry, cacheDirectory: cacheDirectory)) {
           removed.add(entry);
         }
       }
@@ -185,7 +192,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
           break;
         }
         final size = await _entrySize(entry);
-        if (await _removeEntry(entry)) {
+        if (await _removeEntry(entry, cacheDirectory: cacheDirectory)) {
           removed.add(entry);
           total -= size;
         }
@@ -556,15 +563,39 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   }) async {
     final removed = <ModelCacheEntry>[];
     for (final entry in await list(cacheDirectory: cacheDirectory)) {
-      if (entry.cacheKey == cacheKey && await _removeEntry(entry)) {
+      if (entry.cacheKey == cacheKey &&
+          await _removeEntry(entry, cacheDirectory: cacheDirectory)) {
         removed.add(entry);
       }
     }
     return removed;
   }
 
-  Future<bool> _removeEntry(ModelCacheEntry entry) async {
-    final directory = Directory(path.dirname(entry.filePath));
+  File? _entryFileInCacheDirectory(ModelCacheEntry entry, Directory directory) {
+    final directoryPath = path.normalize(path.absolute(directory.path));
+    final filePath = path.normalize(path.absolute(entry.filePath));
+    if (!path.isWithin(directoryPath, filePath) ||
+        !path.equals(path.dirname(filePath), directoryPath)) {
+      return null;
+    }
+    return File(filePath);
+  }
+
+  Future<bool> _removeEntry(
+    ModelCacheEntry entry, {
+    String? cacheDirectory,
+  }) async {
+    final rootPath = path.normalize(
+      path.absolute(_rootDirectory(cacheDirectory).path),
+    );
+    final directoryPath = path.normalize(
+      path.absolute(path.dirname(entry.filePath)),
+    );
+    if (path.equals(directoryPath, rootPath) ||
+        !path.isWithin(rootPath, directoryPath)) {
+      return false;
+    }
+    final directory = Directory(directoryPath);
     if (!await directory.exists()) {
       return false;
     }

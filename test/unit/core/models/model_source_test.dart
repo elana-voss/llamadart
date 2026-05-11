@@ -165,6 +165,8 @@ void main() {
         'hf://owner/repo/sub/%2E%2E/model.gguf',
         'hf://owner/repo/dir%2Fx.gguf',
         r'hf://owner/repo/dir%5Cx.gguf',
+        'hf://owner/repo/bad%/model.gguf',
+        'hf://owner/repo/bad%ZZ/model.gguf',
       ];
 
       for (final value in invalidValues) {

@@ -181,6 +181,41 @@ void main() {
       expect(await manager.list(cacheDirectory: customCacheDirectory), isEmpty);
     });
 
+    test(
+      'ignores metadata whose file path points outside its cache entry',
+      () async {
+        final manager = DefaultModelDownloadManager(
+          defaultCacheDirectory: tempDir.path,
+        );
+        server.payload = utf8.encode('cached-model');
+        final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+        final entry = await manager.ensureModel(source);
+        final metadataFile = File(
+          path.join(path.dirname(entry.filePath), 'metadata.json'),
+        );
+        final outsideDir = await Directory.systemTemp.createTemp(
+          'llamadart_outside_cache_',
+        );
+        addTearDown(() async {
+          if (await outsideDir.exists()) {
+            await outsideDir.delete(recursive: true);
+          }
+        });
+        final outsideFile = File(path.join(outsideDir.path, 'outside.gguf'))
+          ..writeAsStringSync('outside');
+        final metadata =
+            jsonDecode(metadataFile.readAsStringSync()) as Map<String, dynamic>;
+        metadata['file_path'] = outsideFile.path;
+        metadataFile.writeAsStringSync(jsonEncode(metadata));
+
+        expect(await manager.list(), isEmpty);
+
+        await manager.remove(source.cacheKey);
+
+        expect(outsideFile.existsSync(), isTrue);
+      },
+    );
+
     test('stores sha256 metadata only when checksum is requested', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,
