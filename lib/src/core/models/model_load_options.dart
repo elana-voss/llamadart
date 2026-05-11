@@ -9,7 +9,11 @@ enum ModelCachePolicy {
   /// Require a cached model and fail when it is unavailable.
   cacheOnly,
 
-  /// Do not read from or write to a package-managed model cache.
+  /// Do not reuse stable package-managed cache entries.
+  ///
+  /// File-backed download managers may still write the resolved model into a
+  /// transient package-managed directory so native loaders can receive a local
+  /// path and later cleanup can remove the temporary entry.
   noCache,
 }
 

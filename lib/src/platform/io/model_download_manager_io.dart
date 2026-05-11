@@ -207,7 +207,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     final file = File(source.path!);
     if (!await file.exists()) {
       throw LlamaModelException(
-        'Local model file does not exist: ${source.displayName}.',
+        'Local model file does not exist: ${source.path}.',
       );
     }
     return _entryForFile(source, file, DateTime.now().toUtc(), options);
@@ -447,7 +447,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     String? sha256Digest,
   }) async {
     final bytes = await file.length();
-    final digest = sha256Digest ?? await _sha256File(file);
+    final digest = sha256Digest ?? options.sha256;
     return ModelCacheEntry(
       sourceCanonicalKey: source.metadataSourceKey,
       cacheKey: source.cacheKey,

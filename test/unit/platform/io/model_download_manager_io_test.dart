@@ -60,7 +60,7 @@ void main() {
         expect(server.lastTestHeader, 'present');
         expect(File(entry.filePath).readAsBytesSync(), server.payload);
         expect(entry.bytes, server.payload.length);
-        expect(entry.sha256, sha256.convert(server.payload).toString());
+        expect(entry.sha256, isNull);
         expect(entry.sourceCanonicalKey, isNot(contains('secret-token')));
         expect(progress, isNotEmpty);
         expect(progress.last, 1);
@@ -125,6 +125,46 @@ void main() {
       expect(server.requestCount, 1);
       expect(cached.filePath, first.filePath);
       expect(File(cached.filePath).readAsStringSync(), 'cached-model');
+    });
+
+    test('stores sha256 metadata only when checksum is requested', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      server.payload = utf8.encode('checksummed-model');
+      final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+      final expectedSha256 = sha256.convert(server.payload).toString();
+
+      final entry = await manager.ensureModel(
+        source,
+        options: ModelLoadOptions(sha256: expectedSha256),
+      );
+
+      expect(entry.sha256, expectedSha256);
+      expect(
+        File(
+          path.join(path.dirname(entry.filePath), 'metadata.json'),
+        ).readAsStringSync(),
+        contains(expectedSha256),
+      );
+    });
+
+    test('missing local path errors include the full path', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      final missingPath = path.join(tempDir.path, 'missing', 'model.gguf');
+
+      await expectLater(
+        manager.ensureModel(ModelSource.path(missingPath)),
+        throwsA(
+          isA<LlamaModelException>().having(
+            (error) => error.message,
+            'message',
+            contains(missingPath),
+          ),
+        ),
+      );
     });
 
     test(
