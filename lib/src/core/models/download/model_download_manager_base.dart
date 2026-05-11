@@ -363,12 +363,9 @@ String _validatedCacheFilePath(String filePath) {
       'Cache filePath must not be empty.',
     );
   }
-  final normalized = filePath.replaceAll('\\', '/');
-  final decodedPath = _decodeCacheComponent(
-    normalized,
-    'filePath',
-  ).replaceAll('\\', '/');
-  for (final segment in decodedPath.split('/')) {
+  final decodedPath = _decodeCacheComponent(filePath, 'filePath');
+  final normalizedForValidation = decodedPath.replaceAll('\\', '/');
+  for (final segment in normalizedForValidation.split('/')) {
     if (segment.isEmpty) {
       continue;
     }

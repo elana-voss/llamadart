@@ -153,7 +153,7 @@ void main() {
       );
 
       expect(entry.fileName, 'model.gguf');
-      expect(entry.filePath, 'C:/cache/model.gguf');
+      expect(entry.filePath, r'C:\cache\model.gguf');
     });
 
     test('rejects unsafe cache file names and traversal paths', () {
