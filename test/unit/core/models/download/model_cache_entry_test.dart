@@ -152,6 +152,7 @@ void main() {
         r'dir\model.gguf',
         '%2e%2e',
         '..%2Fmodel.gguf',
+        '%',
       ]) {
         expect(
           () => ModelCacheEntry(
@@ -172,6 +173,7 @@ void main() {
         '/cache/../model.gguf',
         '/cache/%2e%2e/model.gguf',
         '/cache/%2e%2e%2fmodel.gguf',
+        '/cache/%/model.gguf',
         r'C:\cache\..\model.gguf',
       ]) {
         expect(

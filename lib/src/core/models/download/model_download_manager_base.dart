@@ -328,7 +328,7 @@ String _metadataSafeSourceKey(String sourceCanonicalKey, String cacheKey) {
 }
 
 String _validatedCacheFileName(String fileName) {
-  final decoded = Uri.decodeComponent(fileName);
+  final decoded = _decodeCacheComponent(fileName, 'fileName');
   if (decoded.isEmpty ||
       decoded == '.' ||
       decoded == '..' ||
@@ -343,6 +343,18 @@ String _validatedCacheFileName(String fileName) {
   return fileName;
 }
 
+String _decodeCacheComponent(String value, String name) {
+  try {
+    return Uri.decodeComponent(value);
+  } on FormatException catch (error) {
+    throw ArgumentError.value(
+      value,
+      name,
+      'Cache $name contains invalid percent-encoding: ${error.message}',
+    );
+  }
+}
+
 String _validatedCacheFilePath(String filePath) {
   if (filePath.isEmpty) {
     throw ArgumentError.value(
@@ -352,13 +364,15 @@ String _validatedCacheFilePath(String filePath) {
     );
   }
   final normalized = filePath.replaceAll('\\', '/');
-  final decodedPath = Uri.decodeComponent(normalized).replaceAll('\\', '/');
+  final decodedPath = _decodeCacheComponent(
+    normalized,
+    'filePath',
+  ).replaceAll('\\', '/');
   for (final segment in decodedPath.split('/')) {
     if (segment.isEmpty) {
       continue;
     }
-    final decoded = Uri.decodeComponent(segment);
-    if (decoded == '.' || decoded == '..') {
+    if (segment == '.' || segment == '..') {
       throw ArgumentError.value(
         filePath,
         'filePath',

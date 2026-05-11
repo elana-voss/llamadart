@@ -123,12 +123,23 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     String cacheKey, {
     String? cacheDirectory,
   }) async {
-    for (final entry in await list(cacheDirectory: cacheDirectory)) {
-      if (entry.cacheKey == cacheKey) {
-        return entry;
+    final entries = <ModelCacheEntry>[];
+    for (final metadataFile in await _candidateMetadataFiles(
+      cacheKey,
+      cacheDirectory: cacheDirectory,
+    )) {
+      try {
+        final entry = await _readMetadata(metadataFile);
+        if (entry.cacheKey == cacheKey && await File(entry.filePath).exists()) {
+          entries.add(entry);
+        }
+      } catch (_) {
+        // Ignore malformed candidates so a corrupt entry does not make cache
+        // inspection unusable.
       }
     }
-    return null;
+    entries.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return entries.isEmpty ? null : entries.first;
   }
 
   @override
@@ -195,6 +206,30 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
 
   Directory _rootDirectory(String? cacheDirectory) {
     return Directory(cacheDirectory ?? defaultCacheDirectory);
+  }
+
+  Future<List<File>> _candidateMetadataFiles(
+    String cacheKey, {
+    String? cacheDirectory,
+  }) async {
+    final root = _rootDirectory(cacheDirectory);
+    if (!await root.exists()) {
+      return const <File>[];
+    }
+    final prefixLength = cacheKey.length < 12 ? cacheKey.length : 12;
+    final directoryKeyPrefix = cacheKey.substring(0, prefixLength);
+    final files = <File>[];
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! Directory) {
+        continue;
+      }
+      final name = path.basename(entity.path);
+      if (name.endsWith('-$directoryKeyPrefix') ||
+          name.contains('-$directoryKeyPrefix-nocache-')) {
+        files.add(File(path.join(entity.path, _metadataFileName)));
+      }
+    }
+    return files;
   }
 
   Future<Directory> _createTransientCacheDirectory(

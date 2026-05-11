@@ -310,6 +310,38 @@ void main() {
       },
     );
 
+    test(
+      'get finds newest matching cache entry without full metadata scan',
+      () async {
+        final manager = DefaultModelDownloadManager(
+          defaultCacheDirectory: tempDir.path,
+        );
+        final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+
+        server.payload = utf8.encode('stable-entry');
+        await manager.ensureModel(source);
+
+        final malformedCandidate = Directory(
+          path.join(tempDir.path, '${source.cacheDirectoryName}-nocache-bad'),
+        )..createSync(recursive: true);
+        File(
+          path.join(malformedCandidate.path, 'metadata.json'),
+        ).writeAsStringSync('{not valid json');
+
+        server.payload = utf8.encode('transient-entry');
+        final transient = await manager.ensureModel(
+          source,
+          options: ModelLoadOptions(cachePolicy: ModelCachePolicy.noCache),
+        );
+
+        final found = await manager.get(source.cacheKey);
+
+        expect(found, isNotNull);
+        expect(found!.filePath, transient.filePath);
+        expect(File(found.filePath).readAsStringSync(), 'transient-entry');
+      },
+    );
+
     test('retries retryable HTTP failures and then succeeds', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,
