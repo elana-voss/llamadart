@@ -3,9 +3,6 @@ import 'model_load_options.dart';
 import 'model_source.dart';
 import 'download/model_download_manager_base.dart';
 
-/// Callback invoked with model download or resolution progress.
-typedef ModelProgressCallback = void Function(ModelDownloadProgress progress);
-
 /// Request data passed to a [ModelResolver].
 class ModelResolveRequest {
   /// Creates a resolver request.
@@ -15,7 +12,7 @@ class ModelResolveRequest {
   final ModelLoadOptions options;
 
   /// Optional progress callback.
-  final ModelProgressCallback? onProgress;
+  final ModelDownloadProgressCallback? onProgress;
 }
 
 /// Resolves a [ModelSource] to a concrete load target for the engine.

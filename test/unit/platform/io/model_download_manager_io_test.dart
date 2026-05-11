@@ -157,6 +157,36 @@ void main() {
       expect(File(cached.filePath).readAsStringSync(), 'cached-model');
     });
 
+    test('cache hit rejects metadata for a different source', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+      final otherSource = ModelSource.url(
+        server.modelUri.replace(queryParameters: const {'variant': 'other'}),
+        fileName: 'other.gguf',
+      );
+
+      server.payload = utf8.encode('cached-model');
+      final first = await manager.ensureModel(source);
+      final metadataFile = File(
+        path.join(path.dirname(first.filePath), 'metadata.json'),
+      );
+      final metadata =
+          jsonDecode(metadataFile.readAsStringSync()) as Map<String, dynamic>;
+      metadata['cache_key'] = otherSource.cacheKey;
+      metadata['file_name'] = otherSource.fileName;
+      metadataFile.writeAsStringSync(jsonEncode(metadata));
+
+      server.payload = utf8.encode('fresh-model');
+      final refreshed = await manager.ensureModel(source);
+
+      expect(server.requestCount, 2);
+      expect(refreshed.cacheKey, source.cacheKey);
+      expect(refreshed.fileName, source.fileName);
+      expect(File(refreshed.filePath).readAsStringSync(), 'fresh-model');
+    });
+
     test('management APIs can target the per-call cache directory', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,

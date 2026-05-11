@@ -43,6 +43,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     if (cachePolicy != ModelCachePolicy.refresh &&
         cachePolicy != ModelCachePolicy.noCache) {
       final cached = await _readCompletedEntry(
+        source,
         metadataFile,
         finalFile,
         options,
@@ -296,6 +297,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   }
 
   Future<ModelCacheEntry?> _readCompletedEntry(
+    ModelSource source,
     File metadataFile,
     File finalFile,
     ModelLoadOptions options,
@@ -304,7 +306,10 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       return null;
     }
     final entry = await _readMetadata(metadataFile);
-    if (entry.filePath != finalFile.path) {
+    if (entry.sourceCanonicalKey != source.metadataSourceKey ||
+        entry.cacheKey != source.cacheKey ||
+        entry.fileName != source.fileName ||
+        entry.filePath != finalFile.path) {
       return null;
     }
     String? verifiedSha256;
