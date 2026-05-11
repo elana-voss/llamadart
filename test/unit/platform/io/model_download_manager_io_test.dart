@@ -367,6 +367,25 @@ void main() {
       );
     });
 
+    test('local directory path fails with a clear file error', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      final directory = Directory(path.join(tempDir.path, 'model-dir'))
+        ..createSync();
+
+      await expectLater(
+        manager.ensureModel(ModelSource.path(directory.path)),
+        throwsA(
+          isA<LlamaModelException>().having(
+            (error) => error.message,
+            'message',
+            allOf(contains('not a file'), contains(directory.path)),
+          ),
+        ),
+      );
+    });
+
     test(
       'noCache creates transient entries that cache cleanup can remove',
       () async {

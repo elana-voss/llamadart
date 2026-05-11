@@ -359,8 +359,7 @@ String _validateRemoteFileName(String fileName, String name) {
   if (decodedFileName.isEmpty ||
       decodedFileName == '.' ||
       decodedFileName == '..' ||
-      decodedFileName.contains('/') ||
-      decodedFileName.contains('\\')) {
+      RegExp(r'[<>:"/\\|?*\x00-\x1F]').hasMatch(decodedFileName)) {
     throw ArgumentError.value(
       fileName,
       name,

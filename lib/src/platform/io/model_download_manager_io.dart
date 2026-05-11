@@ -266,9 +266,15 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     ModelLoadOptions options,
   ) async {
     final file = File(path.normalize(path.absolute(source.path!)));
-    if (!await file.exists()) {
+    final stat = await file.stat();
+    if (stat.type == FileSystemEntityType.notFound) {
       throw LlamaModelException(
         'Local model file does not exist: ${source.path}.',
+      );
+    }
+    if (stat.type != FileSystemEntityType.file) {
+      throw LlamaModelException(
+        'Local model path is not a file: ${source.path}.',
       );
     }
     String? verifiedSha256;

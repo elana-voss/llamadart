@@ -66,14 +66,22 @@ void main() {
         '..',
         '../x.gguf',
         'dir/x.gguf',
-        r'dir\x.gguf',
+        r'dir\\x.gguf',
         '/x.gguf',
-        r'\x.gguf',
+        r'\\x.gguf',
         '%2e',
         '%2e%2e',
         '..%2Fx.gguf',
         'dir%2Fx.gguf',
         r'dir%5Cx.gguf',
+        'bad<name.gguf',
+        'bad>name.gguf',
+        'bad:name.gguf',
+        'bad%22name.gguf',
+        'bad|name.gguf',
+        'bad?name.gguf',
+        'bad*name.gguf',
+        'bad%00name.gguf',
       ];
 
       for (final fileName in invalidNames) {
@@ -107,6 +115,10 @@ void main() {
         'https://host/dir%2Fx.gguf',
         'https://host/dir%5Cx.gguf',
         'https://host/%2e%2e%2Fx.gguf',
+        'https://host/bad:name.gguf',
+        'https://host/bad%22name.gguf',
+        'https://host/bad%7Cname.gguf',
+        'https://host/bad*name.gguf',
       ];
 
       for (final value in invalidUrls) {
