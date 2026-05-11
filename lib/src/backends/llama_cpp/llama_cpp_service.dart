@@ -233,11 +233,8 @@ class LlamaCppService {
   final Map<int, String> _modelBackendNames = <int, String>{};
   final Map<int, int> _modelResolvedGpuLayers = <int, int>{};
 
-  /// Per-context refcount of in-flight `generate()` calls. Tracked as a map
-  /// (not a set) so overlapping generations on the same context don't have
-  /// the first-to-complete clear the marker while another decode is still
-  /// running — which would let stateSaveFile / stateLoadFile race the
-  /// remaining in-flight decode.
+  /// Refcount of in-flight `generate()` calls per context. A set would let the
+  /// first completion clear the marker while another decode is still running.
   final Map<int, int> _generatingContexts = <int, int>{};
 
   // Mapping: modelHandle -> mtmdContextHandle
@@ -3382,18 +3379,9 @@ class LlamaCppService {
 
     final reusedPrefix = _sharedPrefixLength(cachedTokens, tokensPtr, nTokens);
 
-    // Special case: the new prompt exactly matches a KV state freshly
-    // restored from stateLoadFile and not yet touched by inference. The
-    // restored KV is byte-for-byte the state at the end of the persisted
-    // prompt decode, but the loaded context has no live logits to sample
-    // from. Re-decode only the final token to produce fresh logits while
-    // keeping the rest of the restored prefix intact. This is the
-    // resume-after-state-load fast path.
-    //
-    // We require kvFromStateLoad to be true so the regular reuse path
-    // (post-generate cache) still pays the full re-decode cost and stays
-    // bit-exact against a cleared baseline — the property the native
-    // prompt-reuse parity tool asserts.
+    // Loaded KV holds no live logits; re-decode only the final token. Gated
+    // on kvFromStateLoad so the in-process reuse path stays bit-exact against
+    // a cleared baseline (parity property).
     final exactStateLoadMatch =
         ctx.kvFromStateLoad &&
         reusedPrefix == nTokens &&
@@ -3452,9 +3440,6 @@ class LlamaCppService {
     ctx.cachedPromptTokens = exactStateLoadMatch
         ? cachedTokens
         : _copyPromptTokens(tokensPtr, nTokens);
-    // Once we've decoded anything against the restored KV, the in-memory
-    // state has diverged from the on-disk snapshot — drop the flag so the
-    // next ingest goes through the normal reuse path.
     ctx.kvFromStateLoad = false;
 
     return nTokens;
@@ -3906,8 +3891,6 @@ class LlamaCppService {
         'Cannot save state while generation is active on context $contextHandle',
       );
     }
-    // Drain any outstanding async work on the context (GPU/async backends)
-    // so the persisted state reflects fully committed KV contents.
     llama_synchronize(ctx.pointer);
     final pathPtr = path.toNativeUtf8();
     final tokensPtr = tokens.isEmpty ? nullptr : malloc<Int32>(tokens.length);
@@ -3949,8 +3932,6 @@ class LlamaCppService {
         'must be positive',
       );
     }
-    // Drain pending async work before mutating context state, mirroring
-    // _resetContext / embed.
     llama_synchronize(ctx.pointer);
     final pathPtr = path.toNativeUtf8();
     final tokensPtr = malloc<Int32>(tokenCapacity);
@@ -3971,9 +3952,6 @@ class LlamaCppService {
         );
       }
       final actual = countPtr.value;
-      // Defensive bounds check: llama_state_load_file should never write
-      // more tokens than tokenCapacity, but an explicit guard prevents OOB
-      // reads if the native contract changes in a future build.
       if (actual > tokenCapacity) {
         throw StateError(
           'llama_state_load_file returned actual=$actual '
@@ -4908,14 +4886,9 @@ class _LlamaContextWrapper {
   final _LlamaModelWrapper? _modelKeepAlive;
   List<int>? cachedPromptTokens;
 
-  /// True when [cachedPromptTokens] reflects a KV-cache state that was
-  /// just loaded from disk via stateLoadFile and has not yet been
-  /// extended by any decode/generate. In this narrow window the
-  /// exact-prompt ingest path can skip re-decoding the prefix and only
-  /// re-decode the trailing token to produce fresh logits. Any
-  /// subsequent generate clears the flag, so the parity property
-  /// (cleared+full-decode equals reused) still holds for the
-  /// in-process prompt-reuse path.
+  /// Set by stateLoadFile, cleared by any decode. Gates the exact-prompt
+  /// single-token resume path; without the gate, the in-process reuse path
+  /// would diverge from the cleared+full-decode baseline (parity property).
   bool kvFromStateLoad = false;
 
   double lastPerfPromptEvalMs = 0;
