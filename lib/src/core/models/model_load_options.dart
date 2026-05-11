@@ -52,10 +52,11 @@ class ModelLoadOptions {
         'Maximum retry attempts must not be negative.',
       );
     }
+    final normalizedSha256 = _normalizeSha256(sha256);
     return ModelLoadOptions._(
       cachePolicy: cachePolicy,
       cacheDirectory: cacheDirectory,
-      sha256: sha256,
+      sha256: normalizedSha256,
       bearerToken: bearerToken,
       headers: Map<String, String>.unmodifiable(headers),
       cancelToken: cancelToken,
@@ -90,6 +91,9 @@ class ModelLoadOptions {
   final String? cacheDirectory;
 
   /// Optional expected SHA-256 checksum for the model file.
+  ///
+  /// Non-null values are validated as 64-character hexadecimal digests and
+  /// normalized to lowercase.
   final String? sha256;
 
   /// Optional bearer token for authenticated remote model access.
@@ -106,4 +110,19 @@ class ModelLoadOptions {
 
   /// Maximum retry attempts for native downloads.
   final int maxRetries;
+}
+
+String? _normalizeSha256(String? sha256) {
+  if (sha256 == null) {
+    return null;
+  }
+  final normalized = sha256.toLowerCase();
+  if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(normalized)) {
+    throw ArgumentError.value(
+      sha256,
+      'sha256',
+      'SHA-256 checksum must be a 64-character hexadecimal string.',
+    );
+  }
+  return normalized;
 }

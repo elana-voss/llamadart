@@ -57,6 +57,10 @@ class ModelDownloadProgress {
 class ModelCacheEntry {
   /// Creates cache metadata for a model file.
   factory ModelCacheEntry({
+    /// Raw canonical source key used to derive [cacheKey].
+    ///
+    /// The stored [sourceCanonicalKey] value is sanitized for metadata by
+    /// redacting URL secrets and appending the deterministic cache key.
     required String sourceCanonicalKey,
     required String cacheKey,
     required String fileName,
@@ -115,10 +119,15 @@ class ModelCacheEntry {
     );
   }
 
-  /// Canonical source key that produced this cached model.
+  /// Metadata-safe source identity that produced this cached model.
+  ///
+  /// For URL-backed sources this is not the raw canonical key: query strings,
+  /// fragments, and user info are redacted before persistence, and [cacheKey]
+  /// is appended so distinct secret-bearing URLs remain distinguishable without
+  /// leaking those secrets into cache metadata.
   final String sourceCanonicalKey;
 
-  /// Deterministic cache key for [sourceCanonicalKey].
+  /// Deterministic cache key derived from the raw canonical source key.
   final String cacheKey;
 
   /// Cached model file name.

@@ -71,7 +71,7 @@ void main() {
               cachePolicy: ModelCachePolicy.refresh,
               bearerToken: 'token',
               headers: const <String, String>{'x-token': 'token'},
-              sha256: 'abc123',
+              sha256: List.filled(64, 'a').join(),
               cacheDirectory: '/tmp/cache',
               resume: false,
               maxRetries: 0,
