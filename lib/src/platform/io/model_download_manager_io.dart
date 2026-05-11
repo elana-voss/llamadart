@@ -63,11 +63,12 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         options,
       );
       final transientFile = File(path.join(transientDir.path, source.fileName));
+      final transientPartFile = File('${transientFile.path}.part');
       final entry = await _download(
         source,
         options,
         transientFile,
-        null,
+        transientPartFile,
         onProgress,
       );
       await _writeMetadata(

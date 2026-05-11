@@ -101,8 +101,9 @@ Cache policies:
 - `preferCached`: reuse a completed cache entry when present; otherwise download.
 - `refresh`: replace the cached file atomically.
 - `cacheOnly`: fail without a network request when the entry is missing.
-- `noCache`: download to a temporary manager entry and remove it on later cache
-  pruning/cleanup; use this for callers that do not want source-keyed reuse.
+- `noCache`: download to a temporary manager entry without source-keyed reuse; call
+  `remove(entry.cacheKey)`/`clear()` when the returned file is no longer needed, or
+  use thresholded `prune(...)` for age/size-based cleanup.
 
 The download manager can also inspect and clean the persisted cache:
 
