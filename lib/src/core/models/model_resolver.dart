@@ -78,43 +78,9 @@ class DefaultModelResolver implements ModelResolver {
     if (request.options.cancelToken?.isCancelled ?? false) {
       throw LlamaStateException('Model source resolution was cancelled.');
     }
-    _rejectUnsupportedFoundationOptions(request.options);
     if (source.isLocal) {
       return LocalModelFile(source.path!);
     }
     return RemoteModelUrl(source.resolvedUri!, useBrowserCache: true);
-  }
-}
-
-void _rejectUnsupportedFoundationOptions(ModelLoadOptions options) {
-  if (options.cachePolicy != ModelCachePolicy.preferCached) {
-    throw LlamaUnsupportedException(
-      '${options.cachePolicy.name} model resolution requires a concrete cache-aware resolver.',
-    );
-  }
-  if (options.bearerToken != null || options.headers.isNotEmpty) {
-    throw LlamaUnsupportedException(
-      'Authenticated model resolution requires a concrete resolver that can apply HTTP credentials.',
-    );
-  }
-  if (options.sha256 != null) {
-    throw LlamaUnsupportedException(
-      'Checksum verification requires a concrete cache-backed resolver.',
-    );
-  }
-  if (options.cacheDirectory != null) {
-    throw LlamaUnsupportedException(
-      'cacheDirectory requires a concrete cache-backed resolver.',
-    );
-  }
-  if (!options.resume) {
-    throw LlamaUnsupportedException(
-      'Disabling resume requires a concrete download-backed resolver.',
-    );
-  }
-  if (options.maxRetries != ModelLoadOptions.defaults.maxRetries) {
-    throw LlamaUnsupportedException(
-      'Custom maxRetries requires a concrete download-backed resolver.',
-    );
   }
 }

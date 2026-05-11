@@ -64,13 +64,74 @@ Hugging Face references. Source values expose deterministic cache keys and
 redacted metadata identities so signed URL query strings are not stored in logs
 or cache metadata.
 
-This release adds the API foundation only. Local sources still use the existing
-native `loadModel(...)` path, while remote sources require a backend that already
-supports URL loading. Package-managed native download/cache IO, authenticated
-requests, checksum verification, refresh/cache-only/no-cache policies, and
-custom retry/resume behavior are reserved for a later implementation phase and
-currently fail with `LlamaUnsupportedException` when requested through the
-default resolver.
+Native/file-backed backends download remote sources into the package-managed
+cache, verify the completed file, persist metadata, and then call the existing
+local `loadModel(...)` path. URL-capable web backends keep using
+`loadModelFromUrl(...)` for simple unauthenticated `preferCached` requests; use
+native/file-backed targets when you need authenticated headers, checksum
+verification, explicit cache policies, retries, or resume.
+
+```dart
+final cancelToken = ModelDownloadCancelToken();
+
+await engine.loadModelSource(
+  ModelSource.url(Uri.parse('https://example.com/model.gguf')),
+  options: ModelLoadOptions(
+    cachePolicy: ModelCachePolicy.preferCached,
+    cacheDirectory: '/app/cache/llamadart-models',
+    sha256: 'expected-lowercase-sha256',
+    bearerToken: 'hf_xxx',
+    cancelToken: cancelToken,
+    resume: true,
+    maxRetries: 3,
+  ),
+  onProgress: (progress) {
+    final fraction = progress.fraction;
+    if (fraction != null) {
+      print('download progress: ${(fraction * 100).toStringAsFixed(1)}%');
+    }
+  },
+);
+```
+
+Cache policies:
+
+- `preferCached`: reuse a completed cache entry when present; otherwise download.
+- `refresh`: replace the cached file atomically.
+- `cacheOnly`: fail without a network request when the entry is missing.
+- `noCache`: download to a temporary manager entry and remove it on later cache
+  pruning/cleanup; use this for callers that do not want source-keyed reuse.
+
+The download manager can also inspect and clean the persisted cache:
+
+```dart
+final manager = DefaultModelDownloadManager(
+  defaultCacheDirectory: '/app/cache/llamadart-models',
+);
+
+final cached = await manager.list();
+final entry = await manager.get(ModelSource.parse('hf://owner/repo/model.gguf').cacheKey);
+await manager.remove(entry!.cacheKey);
+await manager.prune(maxAge: const Duration(days: 30), maxBytes: 20 * 1024 * 1024 * 1024);
+await manager.clear();
+```
+
+Downloaded files are written to `.part` files and promoted to the completed
+model path only after the HTTP stream and optional SHA-256 verification succeed.
+Retry/resume use HTTP Range when possible; if a server ignores a resume request
+and returns `200 OK`, the manager restarts from byte zero. Signed URL query
+strings, fragments, and userinfo are redacted from display strings and metadata.
+
+### Mobile large-download guidance
+
+For Flutter apps, pass an app-controlled `cacheDirectory` from your storage
+strategy (for example an application-support or documents directory selected by
+`path_provider`). Surface progress/cancel controls in the UI, keep downloads
+serialized for large GGUF files, and expect OS backgrounding to interrupt active
+requests. The `.part` resume support lets a later foreground session continue
+when the server supports Range requests. On Android, prefer app-private storage
+unless the app intentionally exposes model files to the user; on iOS, avoid
+cache directories that the OS may purge while a model is still needed.
 
 ## Multimodal projector lifecycle
 

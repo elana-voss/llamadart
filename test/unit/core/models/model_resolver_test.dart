@@ -60,38 +60,27 @@ void main() {
     });
 
     test(
-      'DefaultModelResolver rejects unsupported foundation options for local and remote sources',
-      () {
+      'DefaultModelResolver leaves download/cache options for engine or manager',
+      () async {
         const resolver = DefaultModelResolver();
-        final sources = <ModelSource>[
-          ModelSource.path('/models/model.gguf'),
-          ModelSource.url(Uri.parse('https://host/model.gguf')),
-        ];
-
-        for (final source in sources) {
-          for (final options in <ModelLoadOptions>[
-            ModelLoadOptions(cachePolicy: ModelCachePolicy.refresh),
-            ModelLoadOptions(cachePolicy: ModelCachePolicy.cacheOnly),
-            ModelLoadOptions(cachePolicy: ModelCachePolicy.noCache),
-            ModelLoadOptions(bearerToken: 'token'),
-            ModelLoadOptions(
+        final source = ModelSource.url(Uri.parse('https://host/model.gguf'));
+        final target = await resolver.resolve(
+          source,
+          ModelResolveRequest(
+            options: ModelLoadOptions(
+              cachePolicy: ModelCachePolicy.refresh,
+              bearerToken: 'token',
               headers: const <String, String>{'x-token': 'token'},
+              sha256: 'abc123',
+              cacheDirectory: '/tmp/cache',
+              resume: false,
+              maxRetries: 0,
             ),
-            ModelLoadOptions(sha256: 'abc123'),
-            ModelLoadOptions(cacheDirectory: '/tmp/cache'),
-            ModelLoadOptions(resume: false),
-            ModelLoadOptions(maxRetries: 0),
-          ]) {
-            expect(
-              () => resolver.resolve(
-                source,
-                ModelResolveRequest(options: options),
-              ),
-              throwsA(isA<LlamaUnsupportedException>()),
-              reason: '${source.metadataSourceKey} with $options',
-            );
-          }
-        }
+          ),
+        );
+
+        expect(target, isA<RemoteModelUrl>());
+        expect((target as RemoteModelUrl).url, source.resolvedUri);
       },
     );
   });

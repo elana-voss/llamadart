@@ -17,7 +17,7 @@ import '../models/inference/tool_choice.dart';
 import '../models/model_load_options.dart';
 import '../models/model_resolver.dart';
 import '../models/model_source.dart';
-import '../models/download/model_download_manager_base.dart';
+import '../models/download/model_download_manager.dart';
 import '../models/tools/tool_definition.dart';
 
 enum _ToolStreamingMode { undecided, raw, parsed }
@@ -72,6 +72,9 @@ class LlamaEngine {
 
   /// Resolves source-aware model loading requests.
   final ModelResolver modelResolver;
+
+  /// Downloads and caches remote model sources for native/file-backed backends.
+  final ModelDownloadManager modelDownloadManager;
   int? _modelHandle;
   int? _contextHandle;
   int? _mmContextHandle;
@@ -95,8 +98,13 @@ class LlamaEngine {
   }
 
   /// Creates a new [LlamaEngine] instance with the given [backend].
-  LlamaEngine(this.backend, {ModelResolver? modelResolver})
-    : modelResolver = modelResolver ?? const DefaultModelResolver();
+  LlamaEngine(
+    this.backend, {
+    ModelResolver? modelResolver,
+    ModelDownloadManager? modelDownloadManager,
+  }) : modelResolver = modelResolver ?? const DefaultModelResolver(),
+       modelDownloadManager =
+           modelDownloadManager ?? DefaultModelDownloadManager();
 
   /// Sets both Dart and native log levels to [level].
   ///
@@ -174,8 +182,9 @@ class LlamaEngine {
   /// Loads a model from a structured [source].
   ///
   /// Local path sources are dispatched through [loadModel]. Remote URL targets
-  /// are dispatched through [loadModelFromUrl] when the backend supports URL
-  /// loading. Native download/cache IO is intentionally left for later tasks.
+  /// use the native download/cache manager on file-backed backends, then load
+  /// the cached local file. URL-capable web backends keep using
+  /// [loadModelFromUrl] for unauthenticated prefer-cached requests.
   Future<void> loadModelSource(
     ModelSource source, {
     ModelParams modelParams = const ModelParams(),
@@ -202,10 +211,14 @@ class LlamaEngine {
           );
         }
         if (!backend.supportsUrlLoading) {
-          throw LlamaUnsupportedException(
-            'Resolved remote model URLs require a backend that supports URL loading.',
+          final entry = await modelDownloadManager.ensureModel(
+            source,
+            options: options,
+            onProgress: onProgress,
           );
+          return loadModel(entry.filePath, modelParams: modelParams);
         }
+        _rejectUnsupportedUrlBackendOptions(options);
         return loadModelFromUrl(
           url.toString(),
           modelParams: modelParams,
@@ -1209,6 +1222,39 @@ class LlamaEngine {
     _modelPath = null;
     _cachedModelMetadata = null;
     _isReady = false;
+  }
+
+  void _rejectUnsupportedUrlBackendOptions(ModelLoadOptions options) {
+    if (options.cachePolicy != ModelCachePolicy.preferCached) {
+      throw LlamaUnsupportedException(
+        '${options.cachePolicy.name} model loading requires the native download/cache manager.',
+      );
+    }
+    if (options.bearerToken != null || options.headers.isNotEmpty) {
+      throw LlamaUnsupportedException(
+        'Authenticated model URL loading requires the native download/cache manager.',
+      );
+    }
+    if (options.sha256 != null) {
+      throw LlamaUnsupportedException(
+        'Checksum verification requires the native download/cache manager.',
+      );
+    }
+    if (options.cacheDirectory != null) {
+      throw LlamaUnsupportedException(
+        'cacheDirectory is not supported by URL-loading backends.',
+      );
+    }
+    if (!options.resume) {
+      throw LlamaUnsupportedException(
+        'Disabling resume is not supported by URL-loading backends.',
+      );
+    }
+    if (options.maxRetries != ModelLoadOptions.defaults.maxRetries) {
+      throw LlamaUnsupportedException(
+        'Custom maxRetries is not supported by URL-loading backends.',
+      );
+    }
   }
 
   String _displayNameForSource(String source) {

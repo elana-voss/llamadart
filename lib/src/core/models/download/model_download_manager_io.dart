@@ -1,15 +1,639 @@
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:crypto/crypto.dart';
+import 'package:path/path.dart' as path;
+
 import '../../exceptions.dart';
+import '../model_load_options.dart';
+import '../model_source.dart';
 import 'model_download_manager_base.dart';
 
-/// Native placeholder for the package-managed model download manager.
-///
-/// Real native HTTP download/resume/cache IO is implemented in later tasks.
-class DefaultModelDownloadManager extends ThrowingModelDownloadManager {
-  /// Creates a native placeholder download manager.
-  const DefaultModelDownloadManager();
+const String _metadataFileName = 'metadata.json';
+const int _metadataSchemaVersion = 1;
+
+/// Native file-backed package-managed model download manager.
+class DefaultModelDownloadManager implements ModelDownloadManager {
+  /// Creates a native model download/cache manager.
+  DefaultModelDownloadManager({String? defaultCacheDirectory})
+    : defaultCacheDirectory =
+          defaultCacheDirectory ??
+          path.join(Directory.systemTemp.path, 'llamadart', 'models');
+
+  /// Default cache root used when [ModelLoadOptions.cacheDirectory] is absent.
+  final String defaultCacheDirectory;
 
   @override
-  Object unsupported(String operation) => LlamaUnsupportedException(
-    'Native model download manager $operation is not implemented yet.',
-  );
+  Future<ModelCacheEntry> ensureModel(
+    ModelSource source, {
+    ModelLoadOptions options = ModelLoadOptions.defaults,
+    ModelDownloadProgressCallback? onProgress,
+  }) async {
+    _throwIfCancelled(options);
+    if (source.isLocal) {
+      return _localEntry(source, options);
+    }
+
+    final cachePolicy = options.cachePolicy;
+    final cacheDir = _cacheDirectory(source, options);
+    final finalFile = File(path.join(cacheDir.path, source.fileName));
+    final partFile = File('${finalFile.path}.part');
+    final metadataFile = File(path.join(cacheDir.path, _metadataFileName));
+
+    if (cachePolicy != ModelCachePolicy.refresh &&
+        cachePolicy != ModelCachePolicy.noCache) {
+      final cached = await _readCompletedEntry(
+        metadataFile,
+        finalFile,
+        options,
+      );
+      if (cached != null) {
+        return cached;
+      }
+      if (cachePolicy == ModelCachePolicy.cacheOnly) {
+        throw LlamaStateException(
+          'No cached model is available for ${source.displayName}.',
+        );
+      }
+    }
+
+    if (cachePolicy == ModelCachePolicy.noCache) {
+      final transientDir = await _createTransientCacheDirectory(
+        source,
+        options,
+      );
+      final transientFile = File(path.join(transientDir.path, source.fileName));
+      final entry = await _download(
+        source,
+        options,
+        transientFile,
+        null,
+        onProgress,
+      );
+      await _writeMetadata(
+        File(path.join(transientDir.path, _metadataFileName)),
+        entry,
+      );
+      return entry;
+    }
+
+    await cacheDir.create(recursive: true);
+    final entry = await _download(
+      source,
+      options,
+      finalFile,
+      partFile,
+      onProgress,
+    );
+    await _writeMetadata(metadataFile, entry);
+    return entry;
+  }
+
+  @override
+  Future<List<ModelCacheEntry>> list() async {
+    final root = Directory(defaultCacheDirectory);
+    if (!await root.exists()) {
+      return <ModelCacheEntry>[];
+    }
+    final entries = <ModelCacheEntry>[];
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! Directory) {
+        continue;
+      }
+      final metadataFile = File(path.join(entity.path, _metadataFileName));
+      if (!await metadataFile.exists()) {
+        continue;
+      }
+      try {
+        final entry = await _readMetadata(metadataFile);
+        if (await File(entry.filePath).exists()) {
+          entries.add(entry);
+        }
+      } catch (_) {
+        // Ignore malformed cache entries so one corrupt metadata file does not
+        // make cache inspection unusable.
+      }
+    }
+    entries.sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
+    return entries;
+  }
+
+  @override
+  Future<ModelCacheEntry?> get(String cacheKey) async {
+    for (final entry in await list()) {
+      if (entry.cacheKey == cacheKey) {
+        return entry;
+      }
+    }
+    return null;
+  }
+
+  @override
+  Future<void> remove(String cacheKey) async {
+    final root = Directory(defaultCacheDirectory);
+    if (!await root.exists()) {
+      return;
+    }
+    await for (final entity in root.list(followLinks: false)) {
+      if (entity is! Directory) {
+        continue;
+      }
+      final metadataFile = File(path.join(entity.path, _metadataFileName));
+      if (!await metadataFile.exists()) {
+        continue;
+      }
+      try {
+        final entry = await _readMetadata(metadataFile);
+        if (entry.cacheKey == cacheKey) {
+          await entity.delete(recursive: true);
+          return;
+        }
+      } catch (_) {
+        // Keep scanning; malformed metadata may not be the requested entry.
+      }
+    }
+  }
+
+  @override
+  Future<void> clear() async {
+    final root = Directory(defaultCacheDirectory);
+    if (await root.exists()) {
+      await root.delete(recursive: true);
+    }
+  }
+
+  @override
+  Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes}) async {
+    final entries = await list();
+    final removed = <ModelCacheEntry>[];
+    final now = DateTime.now().toUtc();
+
+    for (final entry in entries) {
+      if (maxAge != null && now.difference(entry.updatedAt.toUtc()) > maxAge) {
+        await remove(entry.cacheKey);
+        removed.add(entry);
+      }
+    }
+
+    if (maxBytes != null) {
+      final remaining = (await list()).toList()
+        ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
+      var total = remaining.fold<int>(
+        0,
+        (sum, entry) => sum + (entry.bytes ?? 0),
+      );
+      for (final entry in remaining) {
+        if (total <= maxBytes) {
+          break;
+        }
+        await remove(entry.cacheKey);
+        removed.add(entry);
+        total -= entry.bytes ?? 0;
+      }
+    }
+
+    return removed;
+  }
+
+  Directory _cacheDirectory(ModelSource source, ModelLoadOptions options) {
+    return Directory(
+      path.join(
+        options.cacheDirectory ?? defaultCacheDirectory,
+        source.cacheDirectoryName,
+      ),
+    );
+  }
+
+  Future<Directory> _createTransientCacheDirectory(
+    ModelSource source,
+    ModelLoadOptions options,
+  ) async {
+    final root = Directory(options.cacheDirectory ?? defaultCacheDirectory);
+    await root.create(recursive: true);
+    final timestamp = DateTime.now().toUtc().microsecondsSinceEpoch;
+    return Directory(
+      path.join(root.path, '${source.cacheDirectoryName}-nocache-$timestamp'),
+    )..createSync(recursive: true);
+  }
+
+  Future<ModelCacheEntry> _localEntry(
+    ModelSource source,
+    ModelLoadOptions options,
+  ) async {
+    final file = File(source.path!);
+    if (!await file.exists()) {
+      throw LlamaModelException(
+        'Local model file does not exist: ${source.displayName}.',
+      );
+    }
+    return _entryForFile(source, file, DateTime.now().toUtc(), options);
+  }
+
+  Future<ModelCacheEntry?> _readCompletedEntry(
+    File metadataFile,
+    File finalFile,
+    ModelLoadOptions options,
+  ) async {
+    if (!await metadataFile.exists() || !await finalFile.exists()) {
+      return null;
+    }
+    final entry = await _readMetadata(metadataFile);
+    if (entry.filePath != finalFile.path) {
+      return null;
+    }
+    if (options.sha256 != null) {
+      final actual = await _sha256File(finalFile);
+      if (actual != options.sha256) {
+        await _deleteIfExists(finalFile);
+        await _deleteIfExists(metadataFile);
+        return null;
+      }
+    }
+    final refreshed = ModelCacheEntry(
+      sourceCanonicalKey: entry.sourceCanonicalKey,
+      cacheKey: entry.cacheKey,
+      fileName: entry.fileName,
+      filePath: entry.filePath,
+      bytes: entry.bytes,
+      sha256: entry.sha256,
+      etag: entry.etag,
+      lastModified: entry.lastModified,
+      createdAt: entry.createdAt,
+      updatedAt: DateTime.now().toUtc(),
+      expiresAt: entry.expiresAt,
+    );
+    await _writeMetadata(metadataFile, refreshed);
+    return refreshed;
+  }
+
+  Future<ModelCacheEntry> _download(
+    ModelSource source,
+    ModelLoadOptions options,
+    File finalFile,
+    File? partFile,
+    ModelDownloadProgressCallback? onProgress,
+  ) async {
+    final uri = source.resolvedUri;
+    if (uri == null) {
+      throw LlamaModelException('Remote model source has no resolved URL.');
+    }
+
+    Object? lastError;
+    for (var attempt = 0; attempt <= options.maxRetries; attempt += 1) {
+      _throwIfCancelled(options);
+      try {
+        return await _downloadOnce(
+          source,
+          options,
+          uri,
+          finalFile,
+          partFile,
+          onProgress,
+        );
+      } on LlamaStateException {
+        rethrow;
+      } on LlamaModelException catch (error) {
+        lastError = error;
+        if (!_isRetryable(error) || attempt == options.maxRetries) {
+          rethrow;
+        }
+      } on IOException catch (error) {
+        lastError = error;
+        if (attempt == options.maxRetries) {
+          throw LlamaModelException(
+            'Failed to download ${source.displayName}.',
+            error,
+          );
+        }
+      }
+    }
+    throw LlamaModelException(
+      'Failed to download ${source.displayName}.',
+      lastError,
+    );
+  }
+
+  Future<ModelCacheEntry> _downloadOnce(
+    ModelSource source,
+    ModelLoadOptions options,
+    Uri uri,
+    File finalFile,
+    File? partFile,
+    ModelDownloadProgressCallback? onProgress,
+  ) async {
+    await finalFile.parent.create(recursive: true);
+    final downloadFile = partFile ?? File('${finalFile.path}.download');
+    final partMetadataFile = partFile == null
+        ? null
+        : _partMetadataFile(partFile);
+    final partMetadata = partMetadataFile == null
+        ? null
+        : await _readPartMetadata(partMetadataFile);
+    var existingBytes = 0;
+    final canResumePartial =
+        partFile != null &&
+        options.resume &&
+        await partFile.exists() &&
+        (partMetadata != null || options.sha256 != null);
+    if (canResumePartial) {
+      existingBytes = await partFile.length();
+    } else {
+      await _deleteIfExists(downloadFile);
+      if (partMetadataFile != null) {
+        await _deleteIfExists(partMetadataFile);
+      }
+    }
+
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(uri);
+      request.followRedirects = true;
+      request.maxRedirects = 10;
+      for (final header in options.headers.entries) {
+        request.headers.set(header.key, header.value);
+      }
+      final bearerToken = options.bearerToken;
+      if (bearerToken != null) {
+        request.headers.set(
+          HttpHeaders.authorizationHeader,
+          'Bearer $bearerToken',
+        );
+      }
+      if (existingBytes > 0) {
+        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$existingBytes-');
+        final validator = partMetadata?.etag ?? partMetadata?.lastModified;
+        if (validator != null) {
+          request.headers.set(HttpHeaders.ifRangeHeader, validator);
+        }
+      }
+
+      final response = await request.close();
+      final statusCode = response.statusCode;
+      final responsePartMetadata = _PartMetadata.fromResponse(response);
+      final append =
+          existingBytes > 0 && statusCode == HttpStatus.partialContent;
+      if (existingBytes > 0 && statusCode == HttpStatus.partialContent) {
+        _validateContentRange(response, existingBytes, source);
+        _validateResumeValidator(partMetadata, responsePartMetadata, source);
+      } else if (existingBytes > 0 && statusCode == HttpStatus.ok) {
+        existingBytes = 0;
+        await _deleteIfExists(downloadFile);
+        if (partMetadataFile != null) {
+          await _deleteIfExists(partMetadataFile);
+        }
+      } else if (statusCode != HttpStatus.ok) {
+        throw LlamaModelException(
+          'Failed to download ${source.displayName}: HTTP $statusCode.',
+          statusCode,
+        );
+      }
+
+      if (partMetadataFile != null) {
+        await _writePartMetadata(partMetadataFile, responsePartMetadata);
+      }
+
+      final sink = downloadFile.openWrite(
+        mode: append ? FileMode.append : FileMode.write,
+      );
+      var receivedBytes = existingBytes;
+      final totalBytes = _totalBytes(response, existingBytes);
+      try {
+        await for (final chunk in response) {
+          _throwIfCancelled(options);
+          sink.add(chunk);
+          receivedBytes += chunk.length;
+          onProgress?.call(
+            ModelDownloadProgress(
+              receivedBytes: receivedBytes,
+              totalBytes: totalBytes,
+            ),
+          );
+        }
+      } finally {
+        await sink.close();
+      }
+      _throwIfCancelled(options);
+
+      if (options.sha256 != null) {
+        final actual = await _sha256File(downloadFile);
+        if (actual != options.sha256) {
+          await _deleteIfExists(downloadFile);
+          throw LlamaModelException(
+            'Checksum mismatch for ${source.displayName}.',
+          );
+        }
+      }
+      await downloadFile.rename(finalFile.path);
+      if (partMetadataFile != null) {
+        await _deleteIfExists(partMetadataFile);
+      }
+      final entry = await _entryForFile(
+        source,
+        finalFile,
+        DateTime.now().toUtc(),
+        options,
+        etag: responsePartMetadata.etag,
+        lastModified: responsePartMetadata.lastModified,
+      );
+      onProgress?.call(
+        ModelDownloadProgress(
+          receivedBytes: entry.bytes ?? 0,
+          totalBytes: entry.bytes,
+        ),
+      );
+      return entry;
+    } finally {
+      client.close(force: true);
+      if (partFile == null) {
+        await _deleteIfExists(downloadFile);
+      }
+    }
+  }
+
+  Future<ModelCacheEntry> _entryForFile(
+    ModelSource source,
+    File file,
+    DateTime timestamp,
+    ModelLoadOptions options, {
+    String? etag,
+    String? lastModified,
+  }) async {
+    final bytes = await file.length();
+    final digest = await _sha256File(file);
+    return ModelCacheEntry(
+      sourceCanonicalKey: source.metadataSourceKey,
+      cacheKey: source.cacheKey,
+      fileName: source.fileName,
+      filePath: file.path,
+      bytes: bytes,
+      sha256: digest,
+      etag: etag,
+      lastModified: lastModified,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    );
+  }
+
+  Future<ModelCacheEntry> _readMetadata(File metadataFile) async {
+    final decoded = jsonDecode(await metadataFile.readAsString());
+    if (decoded is! Map<String, Object?>) {
+      throw const FormatException('Model cache metadata must be an object.');
+    }
+    final schemaVersion = decoded['schema_version'];
+    if (schemaVersion != _metadataSchemaVersion) {
+      throw FormatException(
+        'Unsupported model cache metadata schema: $schemaVersion.',
+      );
+    }
+    return ModelCacheEntry.fromJson(decoded);
+  }
+
+  Future<void> _writeMetadata(File metadataFile, ModelCacheEntry entry) async {
+    await metadataFile.parent.create(recursive: true);
+    final tempFile = File('${metadataFile.path}.tmp');
+    final json = <String, Object?>{
+      'schema_version': _metadataSchemaVersion,
+      ...entry.toJson(),
+    };
+    await tempFile.writeAsString(
+      '${const JsonEncoder.withIndent('  ').convert(json)}\n',
+    );
+    await tempFile.rename(metadataFile.path);
+  }
+}
+
+class _PartMetadata {
+  const _PartMetadata({this.etag, this.lastModified});
+
+  factory _PartMetadata.fromResponse(HttpClientResponse response) {
+    return _PartMetadata(
+      etag: response.headers.value(HttpHeaders.etagHeader),
+      lastModified: response.headers.value(HttpHeaders.lastModifiedHeader),
+    );
+  }
+
+  factory _PartMetadata.fromJson(Map<String, Object?> json) {
+    return _PartMetadata(
+      etag: json['etag'] as String?,
+      lastModified: json['last_modified'] as String?,
+    );
+  }
+
+  final String? etag;
+  final String? lastModified;
+
+  bool get hasValidator => etag != null || lastModified != null;
+
+  Map<String, Object?> toJson() => <String, Object?>{
+    if (etag != null) 'etag': etag,
+    if (lastModified != null) 'last_modified': lastModified,
+  };
+}
+
+File _partMetadataFile(File partFile) => File('${partFile.path}.json');
+
+Future<_PartMetadata?> _readPartMetadata(File file) async {
+  try {
+    if (!await file.exists()) {
+      return null;
+    }
+    final decoded = jsonDecode(await file.readAsString());
+    if (decoded is! Map<String, Object?>) {
+      return null;
+    }
+    final metadata = _PartMetadata.fromJson(decoded);
+    return metadata.hasValidator ? metadata : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+Future<void> _writePartMetadata(File file, _PartMetadata metadata) async {
+  if (!metadata.hasValidator) {
+    await _deleteIfExists(file);
+    return;
+  }
+  await file.writeAsString('${jsonEncode(metadata.toJson())}\n');
+}
+
+void _throwIfCancelled(ModelLoadOptions options) {
+  if (options.cancelToken?.isCancelled ?? false) {
+    throw LlamaStateException('Model download was cancelled.');
+  }
+}
+
+bool _isRetryable(LlamaModelException error) {
+  final details = error.details;
+  return details is int && details >= 500;
+}
+
+int? _totalBytes(HttpClientResponse response, int existingBytes) {
+  final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
+  if (contentRange != null) {
+    final totalPart = contentRange.split('/').last;
+    final total = int.tryParse(totalPart);
+    if (total != null) {
+      return total;
+    }
+  }
+  final length = response.contentLength;
+  if (length >= 0) {
+    return existingBytes + length;
+  }
+  return null;
+}
+
+void _validateContentRange(
+  HttpClientResponse response,
+  int expectedStart,
+  ModelSource source,
+) {
+  final contentRange = response.headers.value(HttpHeaders.contentRangeHeader);
+  if (contentRange == null ||
+      !contentRange.startsWith('bytes $expectedStart-')) {
+    throw LlamaModelException(
+      'Server returned an invalid resume range for ${source.displayName}.',
+    );
+  }
+}
+
+void _validateResumeValidator(
+  _PartMetadata? previous,
+  _PartMetadata current,
+  ModelSource source,
+) {
+  if (previous == null) {
+    return;
+  }
+  final previousEtag = previous.etag;
+  if (previousEtag != null) {
+    if (current.etag != previousEtag) {
+      throw LlamaModelException(
+        'Server returned a different entity validator while resuming ${source.displayName}.',
+      );
+    }
+    return;
+  }
+  final previousLastModified = previous.lastModified;
+  if (previousLastModified != null &&
+      current.lastModified != previousLastModified) {
+    throw LlamaModelException(
+      'Server returned a different modification timestamp while resuming ${source.displayName}.',
+    );
+  }
+}
+
+Future<String> _sha256File(File file) async {
+  final digest = await sha256.bind(file.openRead()).first;
+  return digest.toString();
+}
+
+Future<void> _deleteIfExists(File file) async {
+  try {
+    if (await file.exists()) {
+      await file.delete();
+    }
+  } on FileSystemException {
+    // Best effort cleanup; later file operations surface actionable errors.
+  }
 }

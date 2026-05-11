@@ -16,6 +16,7 @@ class MockLlamaBackend
   });
 
   bool _isReady = false;
+  String? lastModelPath;
   String? lastLoraPath;
   String? lastModelUrl;
   double? lastLoraScale;
@@ -41,6 +42,7 @@ class MockLlamaBackend
   @override
   Future<int> modelLoad(String path, ModelParams params) async {
     modelLoadCalls += 1;
+    lastModelPath = path;
     if (failModelLoad) {
       throw Exception('model load failed');
     }
@@ -203,6 +205,49 @@ class MockLlamaBackend
   }) async {
     return messages.map((m) => "${m['role']}: ${m['content']}").join('\n');
   }
+}
+
+class MockModelDownloadManager implements ModelDownloadManager {
+  MockModelDownloadManager(this.entry);
+
+  final ModelCacheEntry entry;
+  ModelSource? lastSource;
+  ModelLoadOptions? lastOptions;
+  int ensureModelCalls = 0;
+
+  @override
+  Future<ModelCacheEntry> ensureModel(
+    ModelSource source, {
+    ModelLoadOptions options = ModelLoadOptions.defaults,
+    ModelDownloadProgressCallback? onProgress,
+  }) async {
+    ensureModelCalls += 1;
+    lastSource = source;
+    lastOptions = options;
+    onProgress?.call(
+      const ModelDownloadProgress(receivedBytes: 1, totalBytes: 2),
+    );
+    return entry;
+  }
+
+  @override
+  Future<void> clear() async {}
+
+  @override
+  Future<ModelCacheEntry?> get(String cacheKey) async =>
+      cacheKey == entry.cacheKey ? entry : null;
+
+  @override
+  Future<List<ModelCacheEntry>> list() async => <ModelCacheEntry>[entry];
+
+  @override
+  Future<List<ModelCacheEntry>> prune({
+    Duration? maxAge,
+    int? maxBytes,
+  }) async => <ModelCacheEntry>[];
+
+  @override
+  Future<void> remove(String cacheKey) async {}
 }
 
 class MockEmbeddingBackend extends MockLlamaBackend
@@ -382,6 +427,50 @@ void main() {
       expect(progressEvents.single.totalBytes, isNull);
       expect(progressEvents.single.fraction, 0.25);
     });
+
+    test(
+      'loadModelSource downloads remote sources before native model load',
+      () async {
+        final source = ModelSource.url(
+          Uri.parse('https://example.com/model.gguf'),
+        );
+        final entry = ModelCacheEntry(
+          sourceCanonicalKey: source.metadataSourceKey,
+          cacheKey: source.cacheKey,
+          fileName: source.fileName,
+          filePath: '/cache/model.gguf',
+          createdAt: DateTime.utc(2026),
+          updatedAt: DateTime.utc(2026),
+          bytes: 12,
+        );
+        final downloadManager = MockModelDownloadManager(entry);
+        final nativeBackend = MockLlamaBackend();
+        final nativeEngine = LlamaEngine(
+          nativeBackend,
+          modelDownloadManager: downloadManager,
+        );
+        final options = ModelLoadOptions(
+          cachePolicy: ModelCachePolicy.refresh,
+          bearerToken: 'secret-token',
+        );
+        final progressEvents = <ModelDownloadProgress>[];
+
+        await nativeEngine.loadModelSource(
+          source,
+          options: options,
+          onProgress: progressEvents.add,
+        );
+
+        expect(downloadManager.ensureModelCalls, 1);
+        expect(downloadManager.lastSource, source);
+        expect(downloadManager.lastOptions, same(options));
+        expect(nativeBackend.modelLoadCalls, 1);
+        expect(nativeBackend.modelLoadFromUrlCalls, 0);
+        expect(nativeBackend.lastModelPath, '/cache/model.gguf');
+        expect(nativeEngine.isReady, isTrue);
+        expect(progressEvents.single.fraction, 0.5);
+      },
+    );
 
     test(
       'loadModelSource rejects unsupported noCache remote URL option',

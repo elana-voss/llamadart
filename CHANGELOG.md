@@ -1,17 +1,23 @@
 ## 0.6.12
 
-* **Model source API foundation**:
+* **Model source download/cache manager**:
   * Added `ModelSource` for local paths, HTTP(S) URLs, and Hugging Face
     `hf://owner/repo/path/to/model.gguf` references, including deterministic
     cache keys and redacted metadata/log identities for signed URLs.
   * Added `ModelLoadOptions`, `ModelCachePolicy`, resolver targets, and
-    download/cache value models as the public foundation for package-managed
-    model download and cache management.
+    download/cache metadata/progress value models for package-managed model
+    download and cache management.
+  * Added native/file-backed `DefaultModelDownloadManager` support for streaming
+    HTTP downloads, `.part` files, atomic promotion, persisted metadata,
+    authenticated bearer/custom headers, cancellation, retry, Range resume,
+    cache hit/refresh/cache-only/no-cache policies, SHA-256 verification,
+    cache listing, removal, clearing, and age/size pruning.
   * Added `LlamaEngine.loadModelSource(...)` to route local sources through the
-    existing native local loader and remote sources through URL-capable backends.
-    Native download/cache IO remains intentionally unsupported until the next
-    implementation phase, with unsupported cache/auth/checksum/retry/resume
-    options rejected explicitly.
+    existing native local loader, remote sources through the native download
+    cache before local loading, and simple remote sources through URL-capable web
+    backends when available.
+  * Migrated server/testing helpers away from ad-hoc model downloads so examples
+    dogfood the package-managed cache manager.
 * **Native runtime sync**:
   * Updated native hook pinning to `leehack/llamadart-native@b9016`,
     picking up the CUDA 12.8 Blackwell-capable native bundles.

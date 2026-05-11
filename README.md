@@ -90,7 +90,38 @@ Future<void> main() async {
 }
 ```
 
-### 5. Generate embeddings
+### 5. Download and cache a remote GGUF
+
+```dart
+import 'package:llamadart/llamadart.dart';
+
+Future<void> main() async {
+  final engine = LlamaEngine(LlamaBackend());
+  try {
+    await engine.loadModelSource(
+      ModelSource.parse('hf://owner/repo/model-Q4_K_M.gguf'),
+      options: ModelLoadOptions(
+        cachePolicy: ModelCachePolicy.preferCached,
+        cacheDirectory: '/path/to/app/model-cache',
+      ),
+      onProgress: (progress) {
+        final fraction = progress.fraction;
+        if (fraction != null) {
+          print('download ${(fraction * 100).toStringAsFixed(1)}%');
+        }
+      },
+    );
+  } finally {
+    await engine.dispose();
+  }
+}
+```
+
+Native/file-backed backends stream remote models into the package-managed cache,
+resume partial `.part` downloads when the server supports HTTP Range, verify
+optional SHA-256 checksums, and redact signed URL credentials from metadata.
+
+### 6. Generate embeddings
 
 ```dart
 import 'package:llamadart/llamadart.dart';

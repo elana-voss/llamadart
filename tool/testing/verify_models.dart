@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:async';
 import 'dart:convert';
-import 'package:http/http.dart' as http;
 import 'package:llamadart/llamadart.dart';
 import 'package:path/path.dart' as path;
 
@@ -191,8 +190,9 @@ Future<void> main(List<String> args) async {
     if (filter != null && !model.name.toLowerCase().contains(filter)) {
       continue;
     }
-    final filePath = path.join(modelsDir.path, model.fileName);
-    final file = File(filePath);
+    final legacyFilePath = path.join(modelsDir.path, model.fileName);
+    var filePath = legacyFilePath;
+    final file = File(legacyFilePath);
 
     print('\n================================================================');
     print('TESTING MODEL: ${model.name}');
@@ -203,7 +203,11 @@ Future<void> main(List<String> args) async {
     if (!file.existsSync()) {
       print('Model not found locally. Downloading...');
       try {
-        await _downloadModel(model.downloadUrl, filePath);
+        filePath = await _ensureModel(
+          modelsDir: modelsDir,
+          fileName: model.fileName,
+          downloadUrl: model.downloadUrl,
+        );
         print('Download complete.');
       } catch (e) {
         print('FAILED to download model: $e');
@@ -460,28 +464,23 @@ class VerificationResult {
   });
 }
 
-Future<void> _downloadModel(String url, String destPath) async {
-  final file = File(destPath);
-  final request = http.Request('GET', Uri.parse(url));
-  final response = await http.Client().send(request);
-
-  if (response.statusCode != 200) {
-    throw Exception('Failed to download model: ${response.statusCode}');
-  }
-
-  final totalBytes = response.contentLength;
-  int receivedBytes = 0;
-  final sink = file.openWrite();
-
-  await for (final chunk in response.stream) {
-    sink.add(chunk);
-    receivedBytes += chunk.length;
-    if (totalBytes != null) {
-      final progress = (receivedBytes / totalBytes) * 100;
-      stdout.write('\rDownloading: ${progress.toStringAsFixed(2)}%');
-    }
-  }
-
-  await sink.close();
+Future<String> _ensureModel({
+  required Directory modelsDir,
+  required String fileName,
+  required String downloadUrl,
+}) async {
+  final manager = DefaultModelDownloadManager(
+    defaultCacheDirectory: modelsDir.path,
+  );
+  final entry = await manager.ensureModel(
+    ModelSource.url(Uri.parse(downloadUrl), fileName: fileName),
+    onProgress: (progress) {
+      final fraction = progress.fraction;
+      if (fraction != null) {
+        stdout.write('\rDownloading: ${(fraction * 100).toStringAsFixed(2)}%');
+      }
+    },
+  );
   print(''); // New line after progress
+  return entry.filePath;
 }

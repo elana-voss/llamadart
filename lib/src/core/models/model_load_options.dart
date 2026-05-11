@@ -28,10 +28,11 @@ class ModelDownloadCancelToken {
 
 /// Options used when resolving and loading model sources.
 ///
-/// The default foundation resolver only supports unauthenticated remote URL
-/// loading with [ModelCachePolicy.preferCached]. Native download/cache
-/// implementations added in later tasks may honor refresh/no-cache/cache-only
-/// policies, cache directory, checksum, headers, resume, and retry fields.
+/// Native/file-backed backends use the package-managed download/cache manager
+/// for remote HTTP(S) and Hugging Face sources. URL-loading web backends can
+/// load remote URLs directly and reject options that require native cache IO,
+/// such as authenticated headers, checksum verification, and explicit cache
+/// policy changes.
 class ModelLoadOptions {
   /// Creates model load options.
   factory ModelLoadOptions({
@@ -100,9 +101,9 @@ class ModelLoadOptions {
   /// Optional cancellation token for cooperative cancellation.
   final ModelDownloadCancelToken? cancelToken;
 
-  /// Whether interrupted native downloads may be resumed by later tasks.
+  /// Whether interrupted native downloads may be resumed with HTTP Range.
   final bool resume;
 
-  /// Maximum retry attempts for native downloads in later tasks.
+  /// Maximum retry attempts for native downloads.
   final int maxRetries;
 }
