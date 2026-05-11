@@ -6,7 +6,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:llamadart/src/core/exceptions.dart';
-import 'package:llamadart/src/core/models/download/model_download_manager_io.dart';
+import 'package:llamadart/src/platform/io/model_download_manager_io.dart';
 import 'package:llamadart/src/core/models/model_load_options.dart';
 import 'package:llamadart/src/core/models/model_source.dart';
 import 'package:path/path.dart' as path;

@@ -4,10 +4,10 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as path;
 
-import '../../exceptions.dart';
-import '../model_load_options.dart';
-import '../model_source.dart';
-import 'model_download_manager_base.dart';
+import '../../core/exceptions.dart';
+import '../../core/models/download/model_download_manager_base.dart';
+import '../../core/models/model_load_options.dart';
+import '../../core/models/model_source.dart';
 
 const String _metadataFileName = 'metadata.json';
 const int _metadataSchemaVersion = 1;
