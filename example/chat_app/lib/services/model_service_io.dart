@@ -80,21 +80,39 @@ class ModelServiceIO implements ModelService {
     required Function(String filename) onSuccess,
     required Function(dynamic error) onError,
   }) async {
-    final hasMmproj = model.multimodalProjectorSource is RemoteModelAssetSource;
-    final stageCount = hasMmproj ? 2 : 1;
+    final modelRemoteSource = model.modelSource is RemoteModelAssetSource
+        ? model.modelSource as RemoteModelAssetSource
+        : null;
+    final mmprojRemoteSource =
+        model.multimodalProjectorSource is RemoteModelAssetSource
+        ? model.multimodalProjectorSource as RemoteModelAssetSource
+        : null;
+    final stageCount = [
+      modelRemoteSource,
+      mmprojRemoteSource,
+    ].whereType<RemoteModelAssetSource>().length;
+    final modelStageIndex = modelRemoteSource == null ? 0 : 1;
+    final mmprojStageIndex = mmprojRemoteSource == null
+        ? 0
+        : modelRemoteSource == null
+        ? 1
+        : 2;
+    final providedTotalBytes =
+        modelRemoteSource == null && mmprojRemoteSource != null
+        ? mmprojRemoteSource.sizeBytes
+        : (model.sizeBytes > 0 ? model.sizeBytes : null);
     final progressDispatcher = _ProgressDispatcher(
       onProgress: onProgress,
       onProgressDetail: onProgressDetail,
     );
     final aggregate = ModelDownloadProgressTracker(
-      includeMmproj: hasMmproj,
-      providedTotalBytes: model.sizeBytes > 0 ? model.sizeBytes : null,
+      includeMmproj: mmprojRemoteSource != null,
+      providedTotalBytes: providedTotalBytes,
     );
 
     try {
       await _validateLocalSource(model.modelSource);
-      final modelRemoteSource = model.modelSource;
-      if (modelRemoteSource is RemoteModelAssetSource) {
+      if (modelRemoteSource != null) {
         final modelSavePath = _assetPath(modelsDir, modelRemoteSource);
         await _downloadFileWithResume(
           url: modelRemoteSource.url,
@@ -105,7 +123,7 @@ class ModelServiceIO implements ModelService {
             progressDispatcher.emit(
               aggregate.buildProgress(
                 stage: ModelDownloadStage.model,
-                stageIndex: 1,
+                stageIndex: modelStageIndex,
                 stageCount: stageCount,
                 stageDownloadedBytes: downloadedBytes,
                 stageTotalBytes: totalBytes,
@@ -118,10 +136,10 @@ class ModelServiceIO implements ModelService {
 
       final mmprojSource = model.multimodalProjectorSource;
       await _validateLocalSource(mmprojSource);
-      if (mmprojSource is RemoteModelAssetSource) {
-        final mmprojSavePath = _assetPath(modelsDir, mmprojSource);
+      if (mmprojRemoteSource != null) {
+        final mmprojSavePath = _assetPath(modelsDir, mmprojRemoteSource);
         await _downloadFileWithResume(
-          url: mmprojSource.url,
+          url: mmprojRemoteSource.url,
           savePath: mmprojSavePath,
           cancelToken: cancelToken,
           onProgress: (downloadedBytes, totalBytes, resumed) {
@@ -129,7 +147,7 @@ class ModelServiceIO implements ModelService {
             progressDispatcher.emit(
               aggregate.buildProgress(
                 stage: ModelDownloadStage.multimodalProjector,
-                stageIndex: 2,
+                stageIndex: mmprojStageIndex,
                 stageCount: stageCount,
                 stageDownloadedBytes: downloadedBytes,
                 stageTotalBytes: totalBytes,
@@ -140,10 +158,12 @@ class ModelServiceIO implements ModelService {
         );
       }
 
-      progressDispatcher.emit(
-        aggregate.finalProgress(stageCount: stageCount),
-        force: true,
-      );
+      if (stageCount > 0) {
+        progressDispatcher.emit(
+          aggregate.finalProgress(stageCount: stageCount),
+          force: true,
+        );
+      }
 
       onSuccess(model.filename);
     } catch (e) {
