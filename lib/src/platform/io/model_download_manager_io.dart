@@ -130,28 +130,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
 
   @override
   Future<void> remove(String cacheKey) async {
-    final root = Directory(defaultCacheDirectory);
-    if (!await root.exists()) {
-      return;
-    }
-    await for (final entity in root.list(followLinks: false)) {
-      if (entity is! Directory) {
-        continue;
-      }
-      final metadataFile = File(path.join(entity.path, _metadataFileName));
-      if (!await metadataFile.exists()) {
-        continue;
-      }
-      try {
-        final entry = await _readMetadata(metadataFile);
-        if (entry.cacheKey == cacheKey) {
-          await entity.delete(recursive: true);
-          return;
-        }
-      } catch (_) {
-        // Keep scanning; malformed metadata may not be the requested entry.
-      }
-    }
+    await _removeByCacheKey(cacheKey);
   }
 
   @override
@@ -170,25 +149,28 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
 
     for (final entry in entries) {
       if (maxAge != null && now.difference(entry.updatedAt.toUtc()) > maxAge) {
-        await remove(entry.cacheKey);
-        removed.add(entry);
+        if (await _removeEntry(entry)) {
+          removed.add(entry);
+        }
       }
     }
 
     if (maxBytes != null) {
       final remaining = (await list()).toList()
         ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
-      var total = remaining.fold<int>(
-        0,
-        (sum, entry) => sum + (entry.bytes ?? 0),
-      );
+      var total = 0;
+      for (final entry in remaining) {
+        total += await _entrySize(entry);
+      }
       for (final entry in remaining) {
         if (total <= maxBytes) {
           break;
         }
-        await remove(entry.cacheKey);
-        removed.add(entry);
-        total -= entry.bytes ?? 0;
+        final size = await _entrySize(entry);
+        if (await _removeEntry(entry)) {
+          removed.add(entry);
+          total -= size;
+        }
       }
     }
 
@@ -416,6 +398,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       }
       _throwIfCancelled(options);
 
+      String? verifiedSha256;
       if (options.sha256 != null) {
         final actual = await _sha256File(downloadFile);
         if (actual != options.sha256) {
@@ -424,6 +407,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
             'Checksum mismatch for ${source.displayName}.',
           );
         }
+        verifiedSha256 = actual;
       }
       await downloadFile.rename(finalFile.path);
       if (partMetadataFile != null) {
@@ -436,6 +420,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         options,
         etag: responsePartMetadata.etag,
         lastModified: responsePartMetadata.lastModified,
+        sha256Digest: verifiedSha256,
       );
       onProgress?.call(
         ModelDownloadProgress(
@@ -459,9 +444,10 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     ModelLoadOptions options, {
     String? etag,
     String? lastModified,
+    String? sha256Digest,
   }) async {
     final bytes = await file.length();
-    final digest = await _sha256File(file);
+    final digest = sha256Digest ?? await _sha256File(file);
     return ModelCacheEntry(
       sourceCanonicalKey: source.metadataSourceKey,
       cacheKey: source.cacheKey,
@@ -501,6 +487,25 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       '${const JsonEncoder.withIndent('  ').convert(json)}\n',
     );
     await tempFile.rename(metadataFile.path);
+  }
+
+  Future<List<ModelCacheEntry>> _removeByCacheKey(String cacheKey) async {
+    final removed = <ModelCacheEntry>[];
+    for (final entry in await list()) {
+      if (entry.cacheKey == cacheKey && await _removeEntry(entry)) {
+        removed.add(entry);
+      }
+    }
+    return removed;
+  }
+
+  Future<bool> _removeEntry(ModelCacheEntry entry) async {
+    final directory = Directory(path.dirname(entry.filePath));
+    if (!await directory.exists()) {
+      return false;
+    }
+    await directory.delete(recursive: true);
+    return true;
   }
 }
 
@@ -628,6 +633,18 @@ void _validateResumeValidator(
 Future<String> _sha256File(File file) async {
   final digest = await sha256.bind(file.openRead()).first;
   return digest.toString();
+}
+
+Future<int> _entrySize(ModelCacheEntry entry) async {
+  final bytes = entry.bytes;
+  if (bytes != null) {
+    return bytes;
+  }
+  try {
+    return await File(entry.filePath).length();
+  } on FileSystemException {
+    return 0;
+  }
 }
 
 Future<void> _deleteIfExists(File file) async {

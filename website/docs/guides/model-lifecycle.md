@@ -79,7 +79,7 @@ await engine.loadModelSource(
   options: ModelLoadOptions(
     cachePolicy: ModelCachePolicy.preferCached,
     cacheDirectory: '/app/cache/llamadart-models',
-    sha256: 'expected-lowercase-sha256',
+    sha256: '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
     bearerToken: 'hf_xxx',
     cancelToken: cancelToken,
     resume: true,

@@ -154,7 +154,7 @@ void main() {
         );
         expect(await manager.list(), hasLength(2));
 
-        await manager.clear();
+        await manager.remove(source.cacheKey);
 
         expect(File(first.filePath).existsSync(), isFalse);
         expect(File(second.filePath).existsSync(), isFalse);
@@ -423,6 +423,17 @@ void main() {
         expect(await manager.get(first.cacheKey), isNull);
         expect(File(first.filePath).existsSync(), isFalse);
         expect(await manager.get(second.cacheKey), isNotNull);
+
+        final secondMetadataFile = File(
+          path.join(path.dirname(second.filePath), 'metadata.json'),
+        );
+        final secondMetadata = Map<String, Object?>.from(
+          jsonDecode(secondMetadataFile.readAsStringSync()) as Map,
+        );
+        secondMetadata.remove('bytes');
+        secondMetadataFile.writeAsStringSync(
+          '${const JsonEncoder.withIndent('  ').convert(secondMetadata)}\n',
+        );
 
         final pruned = await manager.prune(maxBytes: 1);
         expect(
