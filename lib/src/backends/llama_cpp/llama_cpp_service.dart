@@ -3382,13 +3382,34 @@ class LlamaCppService {
 
     final reusedPrefix = _sharedPrefixLength(cachedTokens, tokensPtr, nTokens);
 
-    if (reusedPrefix <= 0) {
+    // Special case: the new prompt exactly matches a KV state freshly
+    // restored from stateLoadFile and not yet touched by inference. The
+    // restored KV is byte-for-byte the state at the end of the persisted
+    // prompt decode, but the loaded context has no live logits to sample
+    // from. Re-decode only the final token to produce fresh logits while
+    // keeping the rest of the restored prefix intact. This is the
+    // resume-after-state-load fast path.
+    //
+    // We require kvFromStateLoad to be true so the regular reuse path
+    // (post-generate cache) still pays the full re-decode cost and stays
+    // bit-exact against a cleared baseline — the property the native
+    // prompt-reuse parity tool asserts.
+    final exactStateLoadMatch =
+        ctx.kvFromStateLoad &&
+        reusedPrefix == nTokens &&
+        cachedTokens.length == nTokens;
+
+    if (reusedPrefix <= 0 ||
+        (reusedPrefix >= nTokens && !exactStateLoadMatch)) {
+      final canReuseCachedCopy =
+          reusedPrefix == nTokens && cachedTokens.length == nTokens;
       return _decodeAndCacheFullPrompt(
         batch,
         tokensPtr,
         ctx,
         nTokens,
         maxBatchTokens: maxBatchTokens,
+        existingCachedTokens: canReuseCachedCopy ? cachedTokens : null,
       );
     }
 
@@ -3403,15 +3424,7 @@ class LlamaCppService {
       );
     }
 
-    // When the new prompt exactly matches the cached/restored token sequence
-    // (typical after a stateLoadFile resume), there are no new prefix tokens
-    // to decode. Re-decode only the final token so the sampler has fresh
-    // logits to draw from, without clearing or re-evaluating the restored
-    // KV cache. decodeStart = nTokens - 1 gives us a one-token segment whose
-    // KV slot we evict and rewrite in place.
-    final exactMatch =
-        reusedPrefix == nTokens && cachedTokens.length == nTokens;
-    final decodeStart = exactMatch ? nTokens - 1 : reusedPrefix;
+    final decodeStart = exactStateLoadMatch ? nTokens - 1 : reusedPrefix;
 
     final maxSeqPos = llama_memory_seq_pos_max(memory, 0);
     final removeTo = maxSeqPos >= decodeStart ? maxSeqPos + 1 : decodeStart;
@@ -3436,9 +3449,13 @@ class LlamaCppService {
       maxBatchTokens: maxBatchTokens,
     );
 
-    ctx.cachedPromptTokens = exactMatch
+    ctx.cachedPromptTokens = exactStateLoadMatch
         ? cachedTokens
         : _copyPromptTokens(tokensPtr, nTokens);
+    // Once we've decoded anything against the restored KV, the in-memory
+    // state has diverged from the on-disk snapshot — drop the flag so the
+    // next ingest goes through the normal reuse path.
+    ctx.kvFromStateLoad = false;
 
     return nTokens;
   }
@@ -3462,6 +3479,7 @@ class LlamaCppService {
     );
     ctx.cachedPromptTokens =
         existingCachedTokens ?? _copyPromptTokens(tokensPtr, nTokens);
+    ctx.kvFromStateLoad = false;
     return nTokens;
   }
 
@@ -3964,6 +3982,7 @@ class LlamaCppService {
       }
       final loaded = List<int>.generate(actual, (i) => tokensPtr[i]);
       ctx.cachedPromptTokens = loaded;
+      ctx.kvFromStateLoad = true;
       return loaded;
     } finally {
       malloc.free(pathPtr);
@@ -4888,6 +4907,17 @@ class _LlamaContextWrapper {
   final Pointer<llama_context> pointer;
   final _LlamaModelWrapper? _modelKeepAlive;
   List<int>? cachedPromptTokens;
+
+  /// True when [cachedPromptTokens] reflects a KV-cache state that was
+  /// just loaded from disk via stateLoadFile and has not yet been
+  /// extended by any decode/generate. In this narrow window the
+  /// exact-prompt ingest path can skip re-decoding the prefix and only
+  /// re-decode the trailing token to produce fresh logits. Any
+  /// subsequent generate clears the flag, so the parity property
+  /// (cleared+full-decode equals reused) still holds for the
+  /// in-process prompt-reuse path.
+  bool kvFromStateLoad = false;
+
   double lastPerfPromptEvalMs = 0;
   double lastPerfEvalMs = 0;
   double lastPerfSampleMs = 0;
@@ -4899,6 +4929,7 @@ class _LlamaContextWrapper {
     // ignore: unused_local_variable
     final _ = _modelKeepAlive;
     cachedPromptTokens = null;
+    kvFromStateLoad = false;
     llama_free(pointer);
   }
 }
