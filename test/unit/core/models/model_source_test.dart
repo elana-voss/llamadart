@@ -32,6 +32,25 @@ void main() {
       expect(source.toString(), isNot(contains('download=true')));
     });
 
+    test(
+      'explicit URL file names are decoded and included in cache identity',
+      () {
+        final first = ModelSource.url(
+          Uri.parse('https://host/path/model.gguf?download=true'),
+          fileName: 'model%2Egguf',
+        );
+        final second = ModelSource.url(
+          Uri.parse('https://host/path/model.gguf?download=true'),
+          fileName: 'renamed.gguf',
+        );
+
+        expect(first.fileName, 'model.gguf');
+        expect(first.canonicalKey, contains('fileName:model.gguf'));
+        expect(second.canonicalKey, contains('fileName:renamed.gguf'));
+        expect(first.cacheKey, isNot(second.cacheKey));
+      },
+    );
+
     test('http URLs require an authority and host', () {
       expect(
         () => ModelSource.url(Uri.parse('https:model.gguf')),

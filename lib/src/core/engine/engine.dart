@@ -211,8 +211,12 @@ class LlamaEngine {
           );
         }
         if (!backend.supportsUrlLoading) {
+          final downloadSource = ModelSource.url(
+            url,
+            fileName: source.fileName,
+          );
           final entry = await modelDownloadManager.ensureModel(
-            source,
+            downloadSource,
             options: options,
             onProgress: onProgress,
           );

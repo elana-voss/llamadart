@@ -55,7 +55,9 @@ class ModelSource {
       kind: ModelSourceKind.http,
       url: url,
       fileName: inferredFileName,
-      canonicalKey: url.toString(),
+      canonicalKey: fileName == null
+          ? url.toString()
+          : 'url:${url.toString()}\nfileName:$inferredFileName',
     );
   }
 
@@ -365,7 +367,7 @@ String _validateRemoteFileName(String fileName, String name) {
       'Remote model file name must be a non-empty base name.',
     );
   }
-  return fileName;
+  return decodedFileName;
 }
 
 String _decodeFileNameComponent(String fileName, String name) {

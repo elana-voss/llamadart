@@ -207,6 +207,22 @@ class MockLlamaBackend
   }
 }
 
+class MockModelResolver implements ModelResolver {
+  MockModelResolver(this.target);
+
+  final ModelLoadTarget target;
+  ModelSource? lastSource;
+
+  @override
+  Future<ModelLoadTarget> resolve(
+    ModelSource source,
+    ModelResolveRequest request,
+  ) async {
+    lastSource = source;
+    return target;
+  }
+}
+
 class MockModelDownloadManager implements ModelDownloadManager {
   MockModelDownloadManager(this.entry);
 
@@ -466,13 +482,53 @@ void main() {
         );
 
         expect(downloadManager.ensureModelCalls, 1);
-        expect(downloadManager.lastSource, source);
+        expect(downloadManager.lastSource?.resolvedUri, source.resolvedUri);
+        expect(downloadManager.lastSource?.fileName, source.fileName);
         expect(downloadManager.lastOptions, same(options));
         expect(nativeBackend.modelLoadCalls, 1);
         expect(nativeBackend.modelLoadFromUrlCalls, 0);
         expect(nativeBackend.lastModelPath, '/cache/model.gguf');
         expect(nativeEngine.isReady, isTrue);
         expect(progressEvents.single.fraction, 0.5);
+      },
+    );
+
+    test(
+      'native loadModelSource downloads resolved remote URL target',
+      () async {
+        final source = ModelSource.huggingFace(
+          repoId: 'owner/repo',
+          filePath: 'models/original.gguf',
+          fileName: 'resolved.gguf',
+        );
+        final resolvedUrl = Uri.parse('https://cdn.example.com/resolved.gguf');
+        final resolvedSource = ModelSource.url(
+          resolvedUrl,
+          fileName: source.fileName,
+        );
+        final entry = ModelCacheEntry(
+          sourceCanonicalKey: resolvedSource.metadataSourceKey,
+          cacheKey: resolvedSource.cacheKey,
+          fileName: resolvedSource.fileName,
+          filePath: '/cache/resolved.gguf',
+          createdAt: DateTime.utc(2026),
+          updatedAt: DateTime.utc(2026),
+        );
+        final resolver = MockModelResolver(RemoteModelUrl(resolvedUrl));
+        final downloadManager = MockModelDownloadManager(entry);
+        final nativeBackend = MockLlamaBackend();
+        final nativeEngine = LlamaEngine(
+          nativeBackend,
+          modelResolver: resolver,
+          modelDownloadManager: downloadManager,
+        );
+
+        await nativeEngine.loadModelSource(source);
+
+        expect(resolver.lastSource, source);
+        expect(downloadManager.lastSource?.resolvedUri, resolvedUrl);
+        expect(downloadManager.lastSource?.fileName, 'resolved.gguf');
+        expect(nativeBackend.lastModelPath, '/cache/resolved.gguf');
       },
     );
 
