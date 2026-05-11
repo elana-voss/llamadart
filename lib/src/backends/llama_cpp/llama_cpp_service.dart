@@ -232,7 +232,13 @@ class LlamaCppService {
   final Map<int, Map<String, double>> _activeLoras = {};
   final Map<int, String> _modelBackendNames = <int, String>{};
   final Map<int, int> _modelResolvedGpuLayers = <int, int>{};
-  final Set<int> _generatingContexts = {};
+
+  /// Per-context refcount of in-flight `generate()` calls. Tracked as a map
+  /// (not a set) so overlapping generations on the same context don't have
+  /// the first-to-complete clear the marker while another decode is still
+  /// running — which would let stateSaveFile / stateLoadFile race the
+  /// remaining in-flight decode.
+  final Map<int, int> _generatingContexts = <int, int>{};
 
   // Mapping: modelHandle -> mtmdContextHandle
   final Map<int, int> _modelToMtmd = {};
@@ -2560,7 +2566,11 @@ class LlamaCppService {
   }) async* {
     var ctx = _contexts[contextHandle];
     if (ctx == null) throw Exception("Invalid context handle");
-    _generatingContexts.add(contextHandle);
+    _generatingContexts.update(
+      contextHandle,
+      (count) => count + 1,
+      ifAbsent: () => 1,
+    );
 
     final modelHandle = _contextToModel[contextHandle]!;
     final model = _models[modelHandle]!;
@@ -2659,7 +2669,12 @@ class LlamaCppService {
 
       llama_sampler_free(sampler);
     } finally {
-      _generatingContexts.remove(contextHandle);
+      final remaining = (_generatingContexts[contextHandle] ?? 1) - 1;
+      if (remaining <= 0) {
+        _generatingContexts.remove(contextHandle);
+      } else {
+        _generatingContexts[contextHandle] = remaining;
+      }
       malloc.free(tokensPtr);
       malloc.free(pieceBuf);
       if (grammarPtr != nullptr) malloc.free(grammarPtr);
@@ -3861,7 +3876,7 @@ class LlamaCppService {
   bool stateSaveFile(int contextHandle, String path, List<int> tokens) {
     final ctx = _contexts[contextHandle];
     if (ctx == null) return false;
-    if (_generatingContexts.contains(contextHandle)) {
+    if (_generatingContexts.containsKey(contextHandle)) {
       throw StateError(
         'Cannot save state while generation is active on context $contextHandle',
       );
@@ -3894,7 +3909,7 @@ class LlamaCppService {
     if (ctx == null) {
       throw StateError('Unknown context handle: $contextHandle');
     }
-    if (_generatingContexts.contains(contextHandle)) {
+    if (_generatingContexts.containsKey(contextHandle)) {
       throw StateError(
         'Cannot load state while generation is active on context $contextHandle',
       );
