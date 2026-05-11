@@ -2569,44 +2569,48 @@ class LlamaCppService {
       ifAbsent: () => 1,
     );
 
-    final modelHandle = _contextToModel[contextHandle]!;
-    final model = _models[modelHandle]!;
-    final modelParams = _contextParams[contextHandle]!;
-    final vocab = llama_model_get_vocab(model.pointer);
-    final hasMediaParts =
-        parts?.any((p) => p is LlamaImageContent || p is LlamaAudioContent) ??
-        false;
-
-    // 1. Reset Context
-    ctx = _resetContext(
-      contextHandle,
-      ctx,
-      clearMemory: hasMediaParts || !params.reusePromptPrefix,
-    );
-    llama_perf_context_reset(ctx.pointer);
-    final existingSampler = _samplers[contextHandle];
-    if (existingSampler != null) {
-      llama_perf_sampler_reset(existingSampler);
-    }
-
-    // 2. Prepare Resources
-    final nCtx = llama_n_ctx(ctx.pointer);
-    final batch = _batches[contextHandle]!;
-    final tokensPtr = malloc<Int32>(nCtx);
-    final pieceBuf = malloc<Uint8>(256);
+    Pointer<Int32> tokensPtr = nullptr;
+    Pointer<Uint8> pieceBuf = nullptr;
     Pointer<Utf8> grammarPtr = nullptr;
     Pointer<Utf8> rootPtr = nullptr;
     _LazyGrammarConfig? lazyGrammarConfig;
-
-    if (params.grammar != null) {
-      grammarPtr = params.grammar!.toNativeUtf8();
-      rootPtr = params.grammarRoot.toNativeUtf8();
-      if (params.grammarLazy && params.grammarTriggers.isNotEmpty) {
-        lazyGrammarConfig = _buildLazyGrammarConfig(params);
-      }
-    }
+    Pointer<llama_sampler> sampler = nullptr;
 
     try {
+      final modelHandle = _contextToModel[contextHandle]!;
+      final model = _models[modelHandle]!;
+      final modelParams = _contextParams[contextHandle]!;
+      final vocab = llama_model_get_vocab(model.pointer);
+      final hasMediaParts =
+          parts?.any((p) => p is LlamaImageContent || p is LlamaAudioContent) ??
+          false;
+
+      // 1. Reset Context
+      ctx = _resetContext(
+        contextHandle,
+        ctx,
+        clearMemory: hasMediaParts || !params.reusePromptPrefix,
+      );
+      llama_perf_context_reset(ctx.pointer);
+      final existingSampler = _samplers[contextHandle];
+      if (existingSampler != null) {
+        llama_perf_sampler_reset(existingSampler);
+      }
+
+      // 2. Prepare Resources
+      final nCtx = llama_n_ctx(ctx.pointer);
+      final batch = _batches[contextHandle]!;
+      tokensPtr = malloc<Int32>(nCtx);
+      pieceBuf = malloc<Uint8>(256);
+
+      if (params.grammar != null) {
+        grammarPtr = params.grammar!.toNativeUtf8();
+        rootPtr = params.grammarRoot.toNativeUtf8();
+        if (params.grammarLazy && params.grammarTriggers.isNotEmpty) {
+          lazyGrammarConfig = _buildLazyGrammarConfig(params);
+        }
+      }
+
       // 3. Ingest Prompt (Text or Multimodal)
       final promptEvalStopwatch = Stopwatch()..start();
       final initialTokens = _ingestPrompt(
@@ -2630,7 +2634,7 @@ class LlamaCppService {
       _ensureLogitsAvailableAfterPromptEval(ctx.pointer);
 
       // 4. Initialize and Run Sampler Loop
-      final sampler = _initializeSampler(
+      sampler = _initializeSampler(
         params,
         vocab,
         grammarPtr,
@@ -2663,17 +2667,16 @@ class LlamaCppService {
         preservedTokenIds,
         effectiveStopSequences,
       );
-
-      llama_sampler_free(sampler);
     } finally {
+      if (sampler != nullptr) llama_sampler_free(sampler);
       final remaining = (_generatingContexts[contextHandle] ?? 1) - 1;
       if (remaining <= 0) {
         _generatingContexts.remove(contextHandle);
       } else {
         _generatingContexts[contextHandle] = remaining;
       }
-      malloc.free(tokensPtr);
-      malloc.free(pieceBuf);
+      if (tokensPtr != nullptr) malloc.free(tokensPtr);
+      if (pieceBuf != nullptr) malloc.free(pieceBuf);
       if (grammarPtr != nullptr) malloc.free(grammarPtr);
       if (rootPtr != nullptr) malloc.free(rootPtr);
       lazyGrammarConfig?.dispose();
@@ -3932,6 +3935,14 @@ class LlamaCppService {
         tokenCapacity,
         'tokenCapacity',
         'must be positive',
+      );
+    }
+    final contextCapacity = llama_n_ctx(ctx.pointer);
+    if (tokenCapacity > contextCapacity) {
+      throw ArgumentError.value(
+        tokenCapacity,
+        'tokenCapacity',
+        'must not exceed context size ($contextCapacity)',
       );
     }
     llama_synchronize(ctx.pointer);

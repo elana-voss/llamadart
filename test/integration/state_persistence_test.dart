@@ -80,6 +80,14 @@ void main() async {
     );
   });
 
+  test('rejects token capacity larger than context size', () async {
+    final unusedPath = '${tmpDir.path}/oversized-capacity.bin';
+    expect(
+      () => engine.stateLoadFile(unusedPath, tokenCapacity: 257),
+      throwsA(isA<Exception>()),
+    );
+  });
+
   test('round-trips an empty token sequence', () async {
     final savePath = '${tmpDir.path}/empty.bin';
     final saved = await engine.stateSaveFile(savePath, tokens: const []);
@@ -95,6 +103,7 @@ void main() async {
 
       // --- Engine A: seed the KV cache and persist it to disk. ---
       final engineA = LlamaEngine(LlamaBackend());
+      var engineADisposed = false;
       LlamaEngine? engineB;
       try {
         await engineA.loadModel(
@@ -126,6 +135,7 @@ void main() async {
         // Drop engine A so the next decode genuinely starts cold — no
         // warmed KV cache in memory to mask a regression in stateLoadFile.
         await engineA.dispose();
+        engineADisposed = true;
 
         // --- Engine B: cold start, load the persisted state, resume. ---
         engineB = LlamaEngine(LlamaBackend());
@@ -136,7 +146,7 @@ void main() async {
 
         final loadResult = await engineB.stateLoadFile(
           savePath,
-          tokenCapacity: 512,
+          tokenCapacity: 256,
         );
         expect(
           loadResult.tokens,
@@ -178,6 +188,9 @@ void main() async {
         if (engineB != null) {
           await engineB.dispose();
         }
+        if (!engineADisposed) {
+          await engineA.dispose();
+        }
       }
     },
   );
@@ -188,6 +201,7 @@ void main() async {
       const prompt = 'Once upon a time in a small village';
 
       final engineA = LlamaEngine(LlamaBackend());
+      var engineADisposed = false;
       LlamaEngine? engineB;
       try {
         await engineA.loadModel(
@@ -209,6 +223,7 @@ void main() async {
         final savePath = '${tmpDir.path}/exact_match.bin';
         expect(await engineA.stateSaveFile(savePath, tokens: tokens), isTrue);
         await engineA.dispose();
+        engineADisposed = true;
 
         engineB = LlamaEngine(LlamaBackend());
         await engineB.loadModel(
@@ -216,7 +231,7 @@ void main() async {
           modelParams: const ModelParams(contextSize: 256),
         );
 
-        await engineB.stateLoadFile(savePath, tokenCapacity: 512);
+        await engineB.stateLoadFile(savePath, tokenCapacity: 256);
 
         // Re-issue the EXACT same prompt — reusedPrefix == nTokens. The
         // exact-match branch must NOT clear the restored KV cache; only the
@@ -245,6 +260,9 @@ void main() async {
       } finally {
         if (engineB != null) {
           await engineB.dispose();
+        }
+        if (!engineADisposed) {
+          await engineA.dispose();
         }
       }
     },
