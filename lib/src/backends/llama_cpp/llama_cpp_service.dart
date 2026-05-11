@@ -3888,6 +3888,9 @@ class LlamaCppService {
         'Cannot save state while generation is active on context $contextHandle',
       );
     }
+    // Drain any outstanding async work on the context (GPU/async backends)
+    // so the persisted state reflects fully committed KV contents.
+    llama_synchronize(ctx.pointer);
     final pathPtr = path.toNativeUtf8();
     final tokensPtr = tokens.isEmpty ? nullptr : malloc<Int32>(tokens.length);
     try {
@@ -3928,6 +3931,9 @@ class LlamaCppService {
         'must be positive',
       );
     }
+    // Drain pending async work before mutating context state, mirroring
+    // _resetContext / embed.
+    llama_synchronize(ctx.pointer);
     final pathPtr = path.toNativeUtf8();
     final tokensPtr = malloc<Int32>(tokenCapacity);
     final countPtr = malloc<Size>();
