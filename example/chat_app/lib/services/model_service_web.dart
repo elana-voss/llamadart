@@ -447,7 +447,6 @@ class ModelServiceWeb implements ModelService {
     final prefs = await SharedPreferences.getInstance();
     final downloaded =
         prefs.getStringList(_downloadedModelsKey)?.toSet() ?? <String>{};
-    downloaded.remove(model.filename);
     for (final source in _remoteSourcesFor(model)) {
       downloaded.remove(source.cacheKey);
     }

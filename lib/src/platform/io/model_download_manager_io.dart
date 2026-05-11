@@ -250,7 +250,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     ModelSource source,
     ModelLoadOptions options,
   ) async {
-    final file = File(source.path!);
+    final file = File(path.normalize(path.absolute(source.path!)));
     if (!await file.exists()) {
       throw LlamaModelException(
         'Local model file does not exist: ${source.path}.',

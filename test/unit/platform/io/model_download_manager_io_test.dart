@@ -257,6 +257,26 @@ void main() {
       );
     });
 
+    test('normalizes local paths before returning metadata', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      await Directory(path.join(tempDir.path, 'nested')).create();
+      final localFile = File(path.join(tempDir.path, 'local-model.gguf'))
+        ..writeAsStringSync('local-model');
+      final traversalPath = path.join(
+        tempDir.path,
+        'nested',
+        '..',
+        'local-model.gguf',
+      );
+
+      final entry = await manager.ensureModel(ModelSource.path(traversalPath));
+
+      expect(entry.filePath, path.normalize(path.absolute(localFile.path)));
+      expect(entry.filePath, isNot(contains('..')));
+    });
+
     test('missing local path errors include the full path', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,
