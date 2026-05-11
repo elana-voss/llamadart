@@ -3382,16 +3382,13 @@ class LlamaCppService {
 
     final reusedPrefix = _sharedPrefixLength(cachedTokens, tokensPtr, nTokens);
 
-    if (reusedPrefix <= 0 || reusedPrefix >= nTokens) {
-      final canReuseCachedCopy =
-          reusedPrefix == nTokens && cachedTokens.length == nTokens;
+    if (reusedPrefix <= 0) {
       return _decodeAndCacheFullPrompt(
         batch,
         tokensPtr,
         ctx,
         nTokens,
         maxBatchTokens: maxBatchTokens,
-        existingCachedTokens: canReuseCachedCopy ? cachedTokens : null,
       );
     }
 
@@ -3406,7 +3403,15 @@ class LlamaCppService {
       );
     }
 
-    final decodeStart = reusedPrefix;
+    // When the new prompt exactly matches the cached/restored token sequence
+    // (typical after a stateLoadFile resume), there are no new prefix tokens
+    // to decode. Re-decode only the final token so the sampler has fresh
+    // logits to draw from, without clearing or re-evaluating the restored
+    // KV cache. decodeStart = nTokens - 1 gives us a one-token segment whose
+    // KV slot we evict and rewrite in place.
+    final exactMatch =
+        reusedPrefix == nTokens && cachedTokens.length == nTokens;
+    final decodeStart = exactMatch ? nTokens - 1 : reusedPrefix;
 
     final maxSeqPos = llama_memory_seq_pos_max(memory, 0);
     final removeTo = maxSeqPos >= decodeStart ? maxSeqPos + 1 : decodeStart;
@@ -3431,7 +3436,9 @@ class LlamaCppService {
       maxBatchTokens: maxBatchTokens,
     );
 
-    ctx.cachedPromptTokens = _copyPromptTokens(tokensPtr, nTokens);
+    ctx.cachedPromptTokens = exactMatch
+        ? cachedTokens
+        : _copyPromptTokens(tokensPtr, nTokens);
 
     return nTokens;
   }
