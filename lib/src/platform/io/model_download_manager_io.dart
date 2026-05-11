@@ -562,10 +562,25 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     String? cacheDirectory,
   }) async {
     final removed = <ModelCacheEntry>[];
-    for (final entry in await list(cacheDirectory: cacheDirectory)) {
-      if (entry.cacheKey == cacheKey &&
-          await _removeEntry(entry, cacheDirectory: cacheDirectory)) {
-        removed.add(entry);
+    for (final metadataFile in await _candidateMetadataFiles(
+      cacheKey,
+      cacheDirectory: cacheDirectory,
+    )) {
+      try {
+        final entry = await _readMetadata(metadataFile);
+        if (entry.cacheKey != cacheKey ||
+            _entryFileInCacheDirectory(entry, metadataFile.parent) == null) {
+          continue;
+        }
+        if (await _removeCacheDirectory(
+          metadataFile.parent,
+          cacheDirectory: cacheDirectory,
+        )) {
+          removed.add(entry);
+        }
+      } catch (_) {
+        // Ignore malformed metadata so a corrupt entry does not block removing
+        // other cache directories with the same key prefix.
       }
     }
     return removed;
@@ -585,21 +600,29 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     ModelCacheEntry entry, {
     String? cacheDirectory,
   }) async {
+    return _removeCacheDirectory(
+      Directory(path.dirname(entry.filePath)),
+      cacheDirectory: cacheDirectory,
+    );
+  }
+
+  Future<bool> _removeCacheDirectory(
+    Directory directory, {
+    String? cacheDirectory,
+  }) async {
     final rootPath = path.normalize(
       path.absolute(_rootDirectory(cacheDirectory).path),
     );
-    final directoryPath = path.normalize(
-      path.absolute(path.dirname(entry.filePath)),
-    );
+    final directoryPath = path.normalize(path.absolute(directory.path));
     if (path.equals(directoryPath, rootPath) ||
         !path.isWithin(rootPath, directoryPath)) {
       return false;
     }
-    final directory = Directory(directoryPath);
-    if (!await directory.exists()) {
+    final cacheDirectoryToRemove = Directory(directoryPath);
+    if (!await cacheDirectoryToRemove.exists()) {
       return false;
     }
-    await directory.delete(recursive: true);
+    await cacheDirectoryToRemove.delete(recursive: true);
     return true;
   }
 }

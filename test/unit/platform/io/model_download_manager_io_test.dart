@@ -216,6 +216,26 @@ void main() {
       },
     );
 
+    test(
+      'remove deletes matching cache directories even when cached file is missing',
+      () async {
+        final manager = DefaultModelDownloadManager(
+          defaultCacheDirectory: tempDir.path,
+        );
+        server.payload = utf8.encode('cached-model');
+        final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+        final entry = await manager.ensureModel(source);
+        final cacheEntryDirectory = Directory(path.dirname(entry.filePath));
+
+        await File(entry.filePath).delete();
+
+        expect(await manager.list(), isEmpty);
+        await manager.remove(source.cacheKey);
+
+        expect(cacheEntryDirectory.existsSync(), isFalse);
+      },
+    );
+
     test('stores sha256 metadata only when checksum is requested', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,
