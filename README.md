@@ -130,7 +130,9 @@ final prompt = 'You are a concise assistant. Summarize llamadart.';
 final tokens = await engine.tokenize(prompt);
 
 // Populate the KV cache, then save it with the token sequence that produced it.
-await engine.generate(prompt).drain<void>();
+await engine
+    .generate(prompt, params: const GenerationParams(maxTokens: 1))
+    .drain<void>();
 await engine.stateSaveFile('assistant.state', tokens: tokens);
 
 // Later, after loading the same model with a compatible runtime build:

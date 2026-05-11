@@ -3885,7 +3885,9 @@ class LlamaCppService {
   /// Wraps `llama_state_save_file`. Returns true on success.
   bool stateSaveFile(int contextHandle, String path, List<int> tokens) {
     final ctx = _contexts[contextHandle];
-    if (ctx == null) return false;
+    if (ctx == null) {
+      throw StateError('Unknown context handle: $contextHandle');
+    }
     if (_generatingContexts.containsKey(contextHandle)) {
       throw StateError(
         'Cannot save state while generation is active on context $contextHandle',

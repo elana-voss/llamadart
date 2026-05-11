@@ -55,7 +55,7 @@ final tokens = await engine.tokenize(prompt);
 // the state. Use your app's own writable path for the state file.
 await engine.generate(
   prompt,
-  params: const GenerationParams(reusePromptPrefix: true),
+  params: const GenerationParams(maxTokens: 1, reusePromptPrefix: true),
 ).drain<void>();
 await engine.stateSaveFile('/path/to/prompt-prefix.state', tokens: tokens);
 
