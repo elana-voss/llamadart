@@ -182,23 +182,38 @@ abstract interface class ModelDownloadManager {
     ModelDownloadProgressCallback? onProgress,
   });
 
-  /// Lists all known package-managed cache entries, including transient
-  /// `noCache` entries that remain until explicitly cleared or pruned.
-  Future<List<ModelCacheEntry>> list();
+  /// Lists all known package-managed cache entries under [cacheDirectory],
+  /// including transient `noCache` entries that remain until explicitly
+  /// cleared or pruned.
+  ///
+  /// When [cacheDirectory] is omitted, the manager's default cache root is used.
+  Future<List<ModelCacheEntry>> list({String? cacheDirectory});
 
-  /// Gets a cached model entry by [cacheKey], if present.
-  Future<ModelCacheEntry?> get(String cacheKey);
+  /// Gets a cached model entry by [cacheKey], if present under [cacheDirectory].
+  ///
+  /// When [cacheDirectory] is omitted, the manager's default cache root is used.
+  Future<ModelCacheEntry?> get(String cacheKey, {String? cacheDirectory});
 
-  /// Removes a cached model entry by [cacheKey].
-  Future<void> remove(String cacheKey);
+  /// Removes cached model entries by [cacheKey] under [cacheDirectory].
+  ///
+  /// When [cacheDirectory] is omitted, the manager's default cache root is used.
+  Future<void> remove(String cacheKey, {String? cacheDirectory});
 
-  /// Clears all package-managed cached model entries, including transient
-  /// `noCache` entries.
-  Future<void> clear();
+  /// Clears all package-managed cached model entries under [cacheDirectory],
+  /// including transient `noCache` entries.
+  ///
+  /// When [cacheDirectory] is omitted, the manager's default cache root is used.
+  Future<void> clear({String? cacheDirectory});
 
   /// Prunes cached model entries, including transient `noCache` entries, and
   /// returns removed entries.
-  Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes});
+  ///
+  /// When [cacheDirectory] is omitted, the manager's default cache root is used.
+  Future<List<ModelCacheEntry>> prune({
+    Duration? maxAge,
+    int? maxBytes,
+    String? cacheDirectory,
+  });
 }
 
 /// Base implementation for download managers that do not implement IO yet.
@@ -221,27 +236,34 @@ abstract class ThrowingModelDownloadManager implements ModelDownloadManager {
   }
 
   @override
-  Future<List<ModelCacheEntry>> list() async {
+  Future<List<ModelCacheEntry>> list({String? cacheDirectory}) async {
     throw unsupported('list');
   }
 
   @override
-  Future<ModelCacheEntry?> get(String cacheKey) async {
+  Future<ModelCacheEntry?> get(
+    String cacheKey, {
+    String? cacheDirectory,
+  }) async {
     throw unsupported('get');
   }
 
   @override
-  Future<void> remove(String cacheKey) async {
+  Future<void> remove(String cacheKey, {String? cacheDirectory}) async {
     throw unsupported('remove');
   }
 
   @override
-  Future<void> clear() async {
+  Future<void> clear({String? cacheDirectory}) async {
     throw unsupported('clear');
   }
 
   @override
-  Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes}) async {
+  Future<List<ModelCacheEntry>> prune({
+    Duration? maxAge,
+    int? maxBytes,
+    String? cacheDirectory,
+  }) async {
     throw unsupported('prune');
   }
 }

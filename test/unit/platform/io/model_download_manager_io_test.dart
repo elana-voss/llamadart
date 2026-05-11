@@ -127,6 +127,60 @@ void main() {
       expect(File(cached.filePath).readAsStringSync(), 'cached-model');
     });
 
+    test('management APIs can target the per-call cache directory', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      final customCacheDirectory = path.join(tempDir.path, 'custom-cache');
+      server.payload = utf8.encode('custom-cache-model');
+      final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+
+      final entry = await manager.ensureModel(
+        source,
+        options: ModelLoadOptions(cacheDirectory: customCacheDirectory),
+      );
+
+      expect(await manager.list(), isEmpty);
+      expect(
+        await manager.list(cacheDirectory: customCacheDirectory),
+        hasLength(1),
+      );
+      expect(
+        await manager.get(
+          source.cacheKey,
+          cacheDirectory: customCacheDirectory,
+        ),
+        isNotNull,
+      );
+      expect(File(entry.filePath).existsSync(), isTrue);
+
+      final pruned = await manager.prune(
+        maxBytes: 0,
+        cacheDirectory: customCacheDirectory,
+      );
+      expect(pruned.single.cacheKey, source.cacheKey);
+      expect(File(entry.filePath).existsSync(), isFalse);
+
+      final refreshed = await manager.ensureModel(
+        source,
+        options: ModelLoadOptions(cacheDirectory: customCacheDirectory),
+      );
+      expect(File(refreshed.filePath).existsSync(), isTrue);
+
+      await manager.remove(
+        source.cacheKey,
+        cacheDirectory: customCacheDirectory,
+      );
+      expect(await manager.list(cacheDirectory: customCacheDirectory), isEmpty);
+
+      await manager.ensureModel(
+        source,
+        options: ModelLoadOptions(cacheDirectory: customCacheDirectory),
+      );
+      await manager.clear(cacheDirectory: customCacheDirectory);
+      expect(await manager.list(cacheDirectory: customCacheDirectory), isEmpty);
+    });
+
     test('stores sha256 metadata only when checksum is requested', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,

@@ -85,7 +85,7 @@ void main() {
           : p.join(modelsDir, model.filename);
       final mmprojLoadRef = kIsWeb || mmprojSource is LocalModelAssetSource
           ? mmprojSource.loadReference
-          : p.join(modelsDir, model.mmprojFilename);
+          : p.join(modelsDir, mmprojSource.displayName);
 
       final chatService = ChatService();
       try {

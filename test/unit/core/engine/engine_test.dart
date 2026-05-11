@@ -231,23 +231,27 @@ class MockModelDownloadManager implements ModelDownloadManager {
   }
 
   @override
-  Future<void> clear() async {}
+  Future<void> clear({String? cacheDirectory}) async {}
 
   @override
-  Future<ModelCacheEntry?> get(String cacheKey) async =>
-      cacheKey == entry.cacheKey ? entry : null;
+  Future<ModelCacheEntry?> get(
+    String cacheKey, {
+    String? cacheDirectory,
+  }) async => cacheKey == entry.cacheKey ? entry : null;
 
   @override
-  Future<List<ModelCacheEntry>> list() async => <ModelCacheEntry>[entry];
+  Future<List<ModelCacheEntry>> list({String? cacheDirectory}) async =>
+      <ModelCacheEntry>[entry];
 
   @override
   Future<List<ModelCacheEntry>> prune({
     Duration? maxAge,
     int? maxBytes,
+    String? cacheDirectory,
   }) async => <ModelCacheEntry>[];
 
   @override
-  Future<void> remove(String cacheKey) async {}
+  Future<void> remove(String cacheKey, {String? cacheDirectory}) async {}
 }
 
 class MockEmbeddingBackend extends MockLlamaBackend

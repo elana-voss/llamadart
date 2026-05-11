@@ -197,11 +197,11 @@ Future<void> main(List<String> args) async {
     print('\n================================================================');
     print('TESTING MODEL: ${model.name}');
     print('CATEGORY: ${model.category}');
-    print('FILE: $filePath');
     print('================================================================');
 
     if (!file.existsSync()) {
-      print('Model not found locally. Downloading...');
+      print('Model not found at legacy path: $legacyFilePath');
+      print('Downloading...');
       try {
         filePath = await _ensureModel(
           modelsDir: modelsDir,
@@ -216,6 +216,7 @@ Future<void> main(List<String> args) async {
     } else {
       print('Model found locally.');
     }
+    print('FILE: $filePath');
 
     try {
       print('Loading model...');

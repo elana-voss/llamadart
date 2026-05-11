@@ -90,8 +90,8 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   }
 
   @override
-  Future<List<ModelCacheEntry>> list() async {
-    final root = Directory(defaultCacheDirectory);
+  Future<List<ModelCacheEntry>> list({String? cacheDirectory}) async {
+    final root = _rootDirectory(cacheDirectory);
     if (!await root.exists()) {
       return <ModelCacheEntry>[];
     }
@@ -119,8 +119,11 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   }
 
   @override
-  Future<ModelCacheEntry?> get(String cacheKey) async {
-    for (final entry in await list()) {
+  Future<ModelCacheEntry?> get(
+    String cacheKey, {
+    String? cacheDirectory,
+  }) async {
+    for (final entry in await list(cacheDirectory: cacheDirectory)) {
       if (entry.cacheKey == cacheKey) {
         return entry;
       }
@@ -129,21 +132,25 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   }
 
   @override
-  Future<void> remove(String cacheKey) async {
-    await _removeByCacheKey(cacheKey);
+  Future<void> remove(String cacheKey, {String? cacheDirectory}) async {
+    await _removeByCacheKey(cacheKey, cacheDirectory: cacheDirectory);
   }
 
   @override
-  Future<void> clear() async {
-    final root = Directory(defaultCacheDirectory);
+  Future<void> clear({String? cacheDirectory}) async {
+    final root = _rootDirectory(cacheDirectory);
     if (await root.exists()) {
       await root.delete(recursive: true);
     }
   }
 
   @override
-  Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes}) async {
-    final entries = await list();
+  Future<List<ModelCacheEntry>> prune({
+    Duration? maxAge,
+    int? maxBytes,
+    String? cacheDirectory,
+  }) async {
+    final entries = await list(cacheDirectory: cacheDirectory);
     final removed = <ModelCacheEntry>[];
     final now = DateTime.now().toUtc();
 
@@ -156,7 +163,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     }
 
     if (maxBytes != null) {
-      final remaining = (await list()).toList()
+      final remaining = (await list(cacheDirectory: cacheDirectory)).toList()
         ..sort((a, b) => a.updatedAt.compareTo(b.updatedAt));
       var total = 0;
       for (final entry in remaining) {
@@ -184,6 +191,10 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         source.cacheDirectoryName,
       ),
     );
+  }
+
+  Directory _rootDirectory(String? cacheDirectory) {
+    return Directory(cacheDirectory ?? defaultCacheDirectory);
   }
 
   Future<Directory> _createTransientCacheDirectory(
@@ -426,7 +437,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         }
         verifiedSha256 = actual;
       }
-      await downloadFile.rename(finalFile.path);
+      await _replaceFile(downloadFile, finalFile);
       if (partMetadataFile != null) {
         await _deleteIfExists(partMetadataFile);
       }
@@ -501,12 +512,15 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     await tempFile.writeAsString(
       '${const JsonEncoder.withIndent('  ').convert(json)}\n',
     );
-    await tempFile.rename(metadataFile.path);
+    await _replaceFile(tempFile, metadataFile);
   }
 
-  Future<List<ModelCacheEntry>> _removeByCacheKey(String cacheKey) async {
+  Future<List<ModelCacheEntry>> _removeByCacheKey(
+    String cacheKey, {
+    String? cacheDirectory,
+  }) async {
     final removed = <ModelCacheEntry>[];
-    for (final entry in await list()) {
+    for (final entry in await list(cacheDirectory: cacheDirectory)) {
       if (entry.cacheKey == cacheKey && await _removeEntry(entry)) {
         removed.add(entry);
       }
@@ -659,6 +673,44 @@ Future<int> _entrySize(ModelCacheEntry entry) async {
     return await File(entry.filePath).length();
   } on FileSystemException {
     return 0;
+  }
+}
+
+Future<void> _replaceFile(File source, File destination) async {
+  try {
+    await source.rename(destination.path);
+    return;
+  } on FileSystemException {
+    if (!await destination.exists()) {
+      rethrow;
+    }
+  }
+
+  final backup = File(
+    '${destination.path}.replace-${DateTime.now().toUtc().microsecondsSinceEpoch}.bak',
+  );
+  var backedUp = false;
+  try {
+    await destination.rename(backup.path);
+    backedUp = true;
+    await source.rename(destination.path);
+    await _deleteIfExists(backup);
+  } catch (error) {
+    if (backedUp && await backup.exists() && !await destination.exists()) {
+      try {
+        await backup.rename(destination.path);
+      } on FileSystemException {
+        // Preserve the original replacement failure; later cache operations can
+        // surface the backup path if manual recovery is needed.
+      }
+    }
+    if (error is FileSystemException) {
+      rethrow;
+    }
+    throw FileSystemException(
+      'Failed to replace ${destination.path}: $error.',
+      source.path,
+    );
   }
 }
 
