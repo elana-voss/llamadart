@@ -909,7 +909,9 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
     }
 
     for (final model in _models) {
-      if (path == model.url || path == _resolveModelLoadReference(model)) {
+      if (path == model.url ||
+          ((kIsWeb || _modelsDir != null) &&
+              path == _resolveModelLoadReference(model))) {
         return model;
       }
       if (path.contains(model.filename)) {
@@ -939,7 +941,7 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
       return remote.url;
     }
     if (_modelsDir == null) {
-      return remote.filename;
+      throw StateError('Models directory is not initialized.');
     }
     return '${_modelsDir!}/${remote.filename}';
   }

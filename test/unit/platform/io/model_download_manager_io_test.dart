@@ -88,6 +88,36 @@ void main() {
     );
 
     test(
+      'cross-origin redirects do not forward caller supplied headers',
+      () async {
+        final redirectedServer = await _ModelHttpFixture.start();
+        addTearDown(redirectedServer.close);
+        server.redirectTo = redirectedServer.modelUri;
+        redirectedServer.payload = utf8.encode('redirected-model');
+        final manager = DefaultModelDownloadManager(
+          defaultCacheDirectory: tempDir.path,
+        );
+        final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+
+        final entry = await manager.ensureModel(
+          source,
+          options: ModelLoadOptions(
+            bearerToken: 'secret-token',
+            headers: const <String, String>{'X-Test-Header': 'present'},
+          ),
+        );
+
+        expect(server.requestCount, 1);
+        expect(server.lastAuthorization, 'Bearer secret-token');
+        expect(server.lastTestHeader, 'present');
+        expect(redirectedServer.requestCount, 1);
+        expect(redirectedServer.lastAuthorization, isNull);
+        expect(redirectedServer.lastTestHeader, isNull);
+        expect(File(entry.filePath).readAsStringSync(), 'redirected-model');
+      },
+    );
+
+    test(
       'cacheOnly fails on cache miss without touching the network',
       () async {
         final manager = DefaultModelDownloadManager(
@@ -855,6 +885,7 @@ class _ModelHttpFixture {
   String? etag = '"fixture-v1"';
   int failuresBeforeSuccess = 0;
   int failureStatusCode = HttpStatus.internalServerError;
+  Uri? redirectTo;
   int requestCount = 0;
   String? lastRange;
   final rangeHistory = <String?>[];
@@ -886,6 +917,17 @@ class _ModelHttpFixture {
     final currentEtag = etag;
     if (currentEtag != null) {
       request.response.headers.set(HttpHeaders.etagHeader, currentEtag);
+    }
+
+    final redirectTarget = redirectTo;
+    if (redirectTarget != null) {
+      request.response.statusCode = HttpStatus.temporaryRedirect;
+      request.response.headers.set(
+        HttpHeaders.locationHeader,
+        redirectTarget.toString(),
+      );
+      await request.response.close();
+      return;
     }
 
     if (requestCount <= failuresBeforeSuccess) {

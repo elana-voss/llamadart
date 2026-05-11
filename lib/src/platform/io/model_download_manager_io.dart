@@ -414,28 +414,52 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
 
     final client = HttpClient();
     try {
-      final request = await client.getUrl(uri);
-      request.followRedirects = true;
-      request.maxRedirects = 10;
-      for (final header in options.headers.entries) {
-        request.headers.set(header.key, header.value);
-      }
-      final bearerToken = options.bearerToken;
-      if (bearerToken != null) {
-        request.headers.set(
-          HttpHeaders.authorizationHeader,
-          'Bearer $bearerToken',
-        );
-      }
-      if (existingBytes > 0) {
-        request.headers.set(HttpHeaders.rangeHeader, 'bytes=$existingBytes-');
-        final validator = partMetadata?.etag ?? partMetadata?.lastModified;
-        if (validator != null) {
-          request.headers.set(HttpHeaders.ifRangeHeader, validator);
+      var requestUri = uri;
+      late HttpClientResponse response;
+      for (var redirectCount = 0; ; redirectCount += 1) {
+        final request = await client.getUrl(requestUri);
+        request.followRedirects = false;
+        final includeCallerHeaders = _sameOrigin(uri, requestUri);
+        if (includeCallerHeaders) {
+          for (final header in options.headers.entries) {
+            request.headers.set(header.key, header.value);
+          }
+          final bearerToken = options.bearerToken;
+          if (bearerToken != null) {
+            request.headers.set(
+              HttpHeaders.authorizationHeader,
+              'Bearer $bearerToken',
+            );
+          }
         }
-      }
+        if (existingBytes > 0) {
+          request.headers.set(HttpHeaders.rangeHeader, 'bytes=$existingBytes-');
+          final validator = partMetadata?.etag ?? partMetadata?.lastModified;
+          if (validator != null) {
+            request.headers.set(HttpHeaders.ifRangeHeader, validator);
+          }
+        }
 
-      final response = await request.close();
+        response = await request.close();
+        if (!_isRedirectStatus(response.statusCode)) {
+          break;
+        }
+        if (redirectCount >= 10) {
+          await response.drain<void>();
+          throw LlamaModelException(
+            'Too many redirects while downloading ${source.displayName}.',
+          );
+        }
+        final location = response.headers.value(HttpHeaders.locationHeader);
+        if (location == null || location.isEmpty) {
+          await response.drain<void>();
+          throw LlamaModelException(
+            'Redirect missing Location while downloading ${source.displayName}.',
+          );
+        }
+        requestUri = requestUri.resolve(location);
+        await response.drain<void>();
+      }
       final statusCode = response.statusCode;
       final responsePartMetadata = _PartMetadata.fromResponse(response);
       final append =
@@ -771,6 +795,20 @@ void _throwIfCancelled(ModelLoadOptions options) {
 bool _isRetryable(LlamaModelException error) {
   final details = error.details;
   return details is int && details >= 500;
+}
+
+bool _isRedirectStatus(int statusCode) {
+  return statusCode == HttpStatus.movedPermanently ||
+      statusCode == HttpStatus.found ||
+      statusCode == HttpStatus.seeOther ||
+      statusCode == HttpStatus.temporaryRedirect ||
+      statusCode == HttpStatus.permanentRedirect;
+}
+
+bool _sameOrigin(Uri first, Uri second) {
+  return first.scheme == second.scheme &&
+      first.host == second.host &&
+      first.port == second.port;
 }
 
 int? _totalBytes(HttpClientResponse response, int existingBytes) {
