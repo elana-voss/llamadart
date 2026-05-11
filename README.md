@@ -26,6 +26,8 @@
   - Web: WebGPU via bridge runtime (with CPU fallback)
 - 🧭 **Embeddings API**: Generate vectors with `embed(...)` and
   `embedBatch(...)`.
+- 💾 **Native State Persistence**: Save and restore llama.cpp KV-cache state
+  with `stateSaveFile(...)` / `stateLoadFile(...)` for fast raw-prompt resumes.
 - 🖼️ **Multimodal Support**: Vision/audio model runtime support.
 - **LoRA Support**: Runtime GGUF adapter application.
 - 🔇 **Split Logging Control**: Dart logs and native logs can be configured independently.
@@ -117,6 +119,33 @@ Note: embedding support depends on backend/runtime capabilities.
 - Native runtime supports single and batched embeddings.
 - Web runtime requires bridge assets with embedding APIs (`v0.1.7` or newer).
 - See the full guide: https://llamadart.leehack.com/docs/guides/embeddings
+
+### 6. Optional: save and restore native KV-cache state
+
+Native backends can persist llama.cpp KV-cache state for fast raw-prompt
+resume/fork workflows:
+
+```dart
+final prompt = 'You are a concise assistant. Summarize llamadart.';
+final tokens = await engine.tokenize(prompt);
+
+// Populate the KV cache, then save it with the token sequence that produced it.
+await engine.generate(prompt).drain<void>();
+await engine.stateSaveFile('assistant.state', tokens: tokens);
+
+// Later, after loading the same model with a compatible runtime build:
+final restored = await engine.stateLoadFile(
+  'assistant.state',
+  tokenCapacity: await engine.getContextSize(),
+);
+print('Restored ${restored.tokens.length} prompt tokens');
+```
+
+State persistence is native-only; WebGPU bridge sessions report
+`supportsStatePersistence == false` and throw `LlamaUnsupportedException` if
+called. State files are opaque llama.cpp artifacts tied to the same model and
+runtime/build. `ChatSession` message history is not restored automatically, so
+persist chat messages separately when using the high-level chat API.
 
 ---
 

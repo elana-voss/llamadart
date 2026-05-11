@@ -30,6 +30,15 @@ All iOS targets above require the consuming Flutter/Xcode project to use a
 minimum deployment target of `16.4` or newer (for example
 `platform :ios, '16.4'`).
 
+## Runtime capability notes
+
+- **State persistence** (`LlamaEngine.stateSaveFile(...)` /
+  `stateLoadFile(...)`) is available only on native backends that expose
+  `BackendStatePersistence`. The WebGPU bridge does not support llama.cpp state
+  files, so applications should gate this flow with
+  `engine.supportsStatePersistence` and fall back to prompt re-evaluation on
+  web.
+
 ## Current module availability by bundle (`b9016`)
 
 | Bundle key | Available backend modules in bundle |

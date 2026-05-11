@@ -1,3 +1,17 @@
+## Unreleased
+
+* **State persistence API (native backend)**:
+  * Added `LlamaEngine.supportsStatePersistence`,
+    `LlamaEngine.stateSaveFile(...)`, and
+    `LlamaEngine.stateLoadFile(...)` so native callers can persist and restore
+    llama.cpp KV-cache state for fast raw-prompt resume/fork workflows.
+  * Added `BackendStatePersistence` and `StateLoadResult` for custom backend
+    implementers and diagnostics.
+  * Documented that state files are opaque llama.cpp artifacts tied to the same
+    model and runtime/build, that WebGPU does not support state persistence, and
+    that `ChatSession` message history must be persisted separately.
+* **Compatibility note**: no public API breaking changes in the next release.
+
 ## 0.6.12
 
 * **Native runtime sync**:

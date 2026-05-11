@@ -36,6 +36,57 @@ await engine.loadModelFromUrl(
 
 `loadModelFromUrl` requires a backend with URL loading support.
 
+## Native state persistence
+
+Native backends can save and restore llama.cpp KV-cache state to avoid
+re-evaluating a long raw prompt on resume or when forking a prompt prefix. Gate
+the flow with `supportsStatePersistence` because the WebGPU bridge does not
+expose llama.cpp state files.
+
+```dart
+if (!engine.supportsStatePersistence) {
+  throw LlamaUnsupportedException('State persistence is native-only.');
+}
+
+final prompt = 'You are a concise assistant. Summarize llamadart.';
+final tokens = await engine.tokenize(prompt);
+
+// Populate the KV cache, then persist it with the token sequence that produced
+// the state. Use your app's own writable path for the state file.
+await engine.generate(
+  prompt,
+  params: const GenerationParams(reusePromptPrefix: true),
+).drain<void>();
+await engine.stateSaveFile('/path/to/prompt-prefix.state', tokens: tokens);
+
+// Later, after loading the same model with a compatible native runtime build:
+final restored = await engine.stateLoadFile(
+  '/path/to/prompt-prefix.state',
+  tokenCapacity: await engine.getContextSize(),
+);
+
+await for (final token in engine.generate(
+  '$prompt Continue from the saved prefix.',
+  params: const GenerationParams(reusePromptPrefix: true),
+)) {
+  print(token);
+}
+
+print('Restored ${restored.tokens.length} prompt tokens');
+```
+
+Important caveats:
+
+- State files are opaque llama.cpp artifacts. Treat them as tied to the same
+  model file and compatible native runtime/build that created them.
+- `stateLoadFile(...)` restores native KV-cache state only. It does not rebuild
+  `ChatSession` message history; persist and reconstruct chat messages
+  separately when using the high-level chat API.
+- Pass a `tokenCapacity` large enough for the saved prompt token sequence. The
+  current context size is usually a safe default.
+- WebGPU sessions should check `supportsStatePersistence` and use a normal
+  prompt re-evaluation fallback.
+
 ## Multimodal projector lifecycle
 
 ```dart
