@@ -1006,9 +1006,15 @@ class LlamaEngine {
 
   /// Restores a previously saved state from [path]. [tokenCapacity]
   /// caps how many tokens to read back; passing the loaded model's
-  /// `n_ctx` is a safe default. Returns the token sequence the saved
-  /// state was originally produced from — feed it back into the chat
-  /// session so its in-Dart history matches the restored KV cache.
+  /// `n_ctx` is a safe default.
+  ///
+  /// Returns the token sequence the saved state was originally produced
+  /// from. This API restores the native KV cache only — callers that use
+  /// [ChatSession] must persist and reconstruct the chat message history
+  /// separately (e.g. on disk), since [ChatSession.addMessage] takes
+  /// [LlamaChatMessage] objects, not raw token ids. The returned token
+  /// list is exposed mainly for diagnostics and for callers driving the
+  /// engine at the raw prompt level.
   Future<StateLoadResult> stateLoadFile(
     String path, {
     required int tokenCapacity,
