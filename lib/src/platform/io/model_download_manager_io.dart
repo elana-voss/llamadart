@@ -210,7 +210,22 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         'Local model file does not exist: ${source.path}.',
       );
     }
-    return _entryForFile(source, file, DateTime.now().toUtc(), options);
+    String? verifiedSha256;
+    if (options.sha256 != null) {
+      final actual = await _sha256File(file);
+      if (actual != options.sha256) {
+        throw LlamaModelException(
+          'Checksum mismatch for local model file: ${source.path}.',
+        );
+      }
+      verifiedSha256 = actual;
+    }
+    return _entryForFile(
+      source,
+      file,
+      DateTime.now().toUtc(),
+      sha256Digest: verifiedSha256,
+    );
   }
 
   Future<ModelCacheEntry?> _readCompletedEntry(
@@ -225,6 +240,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     if (entry.filePath != finalFile.path) {
       return null;
     }
+    String? verifiedSha256;
     if (options.sha256 != null) {
       final actual = await _sha256File(finalFile);
       if (actual != options.sha256) {
@@ -232,6 +248,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         await _deleteIfExists(metadataFile);
         return null;
       }
+      verifiedSha256 = actual;
     }
     final refreshed = ModelCacheEntry(
       sourceCanonicalKey: entry.sourceCanonicalKey,
@@ -239,7 +256,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       fileName: entry.fileName,
       filePath: entry.filePath,
       bytes: entry.bytes,
-      sha256: entry.sha256,
+      sha256: verifiedSha256 ?? entry.sha256,
       etag: entry.etag,
       lastModified: entry.lastModified,
       createdAt: entry.createdAt,
@@ -417,7 +434,6 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         source,
         finalFile,
         DateTime.now().toUtc(),
-        options,
         etag: responsePartMetadata.etag,
         lastModified: responsePartMetadata.lastModified,
         sha256Digest: verifiedSha256,
@@ -440,14 +456,13 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   Future<ModelCacheEntry> _entryForFile(
     ModelSource source,
     File file,
-    DateTime timestamp,
-    ModelLoadOptions options, {
+    DateTime timestamp, {
     String? etag,
     String? lastModified,
     String? sha256Digest,
   }) async {
     final bytes = await file.length();
-    final digest = sha256Digest ?? options.sha256;
+    final digest = sha256Digest;
     return ModelCacheEntry(
       sourceCanonicalKey: source.metadataSourceKey,
       cacheKey: source.cacheKey,

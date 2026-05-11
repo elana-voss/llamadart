@@ -149,6 +149,60 @@ void main() {
       );
     });
 
+    test('cache hit with sha256 verifies and persists the digest', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      server.payload = utf8.encode('cached-checksum-model');
+      final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+      final first = await manager.ensureModel(source);
+      final expectedSha256 = sha256.convert(server.payload).toString();
+
+      expect(first.sha256, isNull);
+
+      final verified = await manager.ensureModel(
+        source,
+        options: ModelLoadOptions(sha256: expectedSha256),
+      );
+
+      expect(server.requestCount, 1);
+      expect(verified.filePath, first.filePath);
+      expect(verified.sha256, expectedSha256);
+      expect(
+        File(
+          path.join(path.dirname(verified.filePath), 'metadata.json'),
+        ).readAsStringSync(),
+        contains(expectedSha256),
+      );
+    });
+
+    test('local path sha256 is verified before metadata is returned', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      final localFile = File(path.join(tempDir.path, 'local-model.gguf'))
+        ..writeAsStringSync('local-model');
+      final expectedSha256 = sha256
+          .convert(utf8.encode('local-model'))
+          .toString();
+
+      final entry = await manager.ensureModel(
+        ModelSource.path(localFile.path),
+        options: ModelLoadOptions(sha256: expectedSha256),
+      );
+
+      expect(entry.filePath, localFile.path);
+      expect(entry.sha256, expectedSha256);
+
+      await expectLater(
+        manager.ensureModel(
+          ModelSource.path(localFile.path),
+          options: ModelLoadOptions(sha256: List.filled(64, '0').join()),
+        ),
+        throwsA(isA<LlamaModelException>()),
+      );
+    });
+
     test('missing local path errors include the full path', () async {
       final manager = DefaultModelDownloadManager(
         defaultCacheDirectory: tempDir.path,
