@@ -52,6 +52,12 @@ export 'src/core/models/inference/model_params.dart';
 export 'src/core/models/inference/generation_params.dart';
 export 'src/core/models/inference/tool_choice.dart';
 
+// Models - Sources, resolution, and downloads
+export 'src/core/models/model_source.dart';
+export 'src/core/models/model_resolver.dart';
+export 'src/core/models/model_load_options.dart';
+export 'src/core/models/download/model_download_manager.dart';
+
 // Models - Chat
 export 'src/core/models/chat/chat_message.dart';
 export 'src/core/models/chat/content_part.dart';

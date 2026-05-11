@@ -1,0 +1,335 @@
+import '../../exceptions.dart';
+import '../model_load_options.dart';
+import '../model_source.dart';
+
+/// Callback invoked with model download progress.
+typedef ModelDownloadProgressCallback =
+    void Function(ModelDownloadProgress progress);
+
+/// Progress information for a package-managed model download.
+class ModelDownloadProgress {
+  /// Creates download progress information.
+  const ModelDownloadProgress({required this.receivedBytes, this.totalBytes})
+    : _fraction = null;
+
+  /// Creates progress information when only a completion fraction is known.
+  const ModelDownloadProgress.fraction(double fraction)
+    : receivedBytes = 0,
+      totalBytes = null,
+      _fraction = fraction;
+
+  /// Bytes received so far.
+  final int receivedBytes;
+
+  /// Total expected bytes, when known.
+  final int? totalBytes;
+
+  final double? _fraction;
+
+  /// Download completion fraction clamped to `[0, 1]`, or null if unknown.
+  double? get fraction {
+    final knownFraction = _fraction;
+    if (knownFraction != null) {
+      if (knownFraction < 0) {
+        return 0;
+      }
+      if (knownFraction > 1) {
+        return 1;
+      }
+      return knownFraction;
+    }
+    final total = totalBytes;
+    if (total == null || total <= 0) {
+      return null;
+    }
+    final value = receivedBytes / total;
+    if (value < 0) {
+      return 0;
+    }
+    if (value > 1) {
+      return 1;
+    }
+    return value;
+  }
+}
+
+/// Metadata describing a package-managed cached model file.
+class ModelCacheEntry {
+  /// Creates cache metadata for a model file.
+  factory ModelCacheEntry({
+    required String sourceCanonicalKey,
+    required String cacheKey,
+    required String fileName,
+    required String filePath,
+    required DateTime createdAt,
+    required DateTime updatedAt,
+    int? bytes,
+    String? sha256,
+    String? etag,
+    String? lastModified,
+    DateTime? expiresAt,
+  }) {
+    return ModelCacheEntry._(
+      sourceCanonicalKey: _metadataSafeSourceKey(sourceCanonicalKey, cacheKey),
+      cacheKey: cacheKey,
+      fileName: _validatedCacheFileName(fileName),
+      filePath: _validatedCacheFilePath(filePath),
+      bytes: bytes,
+      sha256: sha256,
+      etag: etag,
+      lastModified: lastModified,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      expiresAt: expiresAt,
+    );
+  }
+
+  const ModelCacheEntry._({
+    required this.sourceCanonicalKey,
+    required this.cacheKey,
+    required this.fileName,
+    required this.filePath,
+    required this.createdAt,
+    required this.updatedAt,
+    this.bytes,
+    this.sha256,
+    this.etag,
+    this.lastModified,
+    this.expiresAt,
+  });
+
+  /// Creates cache metadata from a JSON map using snake_case keys.
+  factory ModelCacheEntry.fromJson(Map<String, Object?> json) {
+    return ModelCacheEntry(
+      sourceCanonicalKey: _requiredString(json, 'source_canonical_key'),
+      cacheKey: _requiredString(json, 'cache_key'),
+      fileName: _requiredString(json, 'file_name'),
+      filePath: _requiredString(json, 'file_path'),
+      bytes: _optionalInt(json['bytes']),
+      sha256: json['sha256'] as String?,
+      etag: json['etag'] as String?,
+      lastModified: json['last_modified'] as String?,
+      createdAt: _requiredDateTime(json, 'created_at'),
+      updatedAt: _requiredDateTime(json, 'updated_at'),
+      expiresAt: _optionalDateTime(json['expires_at']),
+    );
+  }
+
+  /// Canonical source key that produced this cached model.
+  final String sourceCanonicalKey;
+
+  /// Deterministic cache key for [sourceCanonicalKey].
+  final String cacheKey;
+
+  /// Cached model file name.
+  final String fileName;
+
+  /// Full path to the cached model file.
+  final String filePath;
+
+  /// Optional model file byte length.
+  final int? bytes;
+
+  /// Optional model file SHA-256 checksum.
+  final String? sha256;
+
+  /// Optional HTTP ETag associated with this model.
+  final String? etag;
+
+  /// Optional HTTP Last-Modified value associated with this model.
+  final String? lastModified;
+
+  /// Creation timestamp for this cache entry.
+  final DateTime createdAt;
+
+  /// Last update timestamp for this cache entry.
+  final DateTime updatedAt;
+
+  /// Optional expiration timestamp for this cache entry.
+  final DateTime? expiresAt;
+
+  /// Converts this entry to JSON using snake_case keys.
+  Map<String, Object?> toJson() => <String, Object?>{
+    'source_canonical_key': sourceCanonicalKey,
+    'cache_key': cacheKey,
+    'file_name': fileName,
+    'file_path': filePath,
+    if (bytes != null) 'bytes': bytes,
+    if (sha256 != null) 'sha256': sha256,
+    if (etag != null) 'etag': etag,
+    if (lastModified != null) 'last_modified': lastModified,
+    'created_at': createdAt.toUtc().toIso8601String(),
+    'updated_at': updatedAt.toUtc().toIso8601String(),
+    if (expiresAt != null) 'expires_at': expiresAt!.toUtc().toIso8601String(),
+  };
+}
+
+/// Public API for package-managed model cache/download implementations.
+abstract interface class ModelDownloadManager {
+  /// Ensures [source] is available as a local cache entry.
+  Future<ModelCacheEntry> ensureModel(
+    ModelSource source, {
+    ModelLoadOptions options = ModelLoadOptions.defaults,
+    ModelDownloadProgressCallback? onProgress,
+  });
+
+  /// Lists all known cached model entries.
+  Future<List<ModelCacheEntry>> list();
+
+  /// Gets a cached model entry by [cacheKey], if present.
+  Future<ModelCacheEntry?> get(String cacheKey);
+
+  /// Removes a cached model entry by [cacheKey].
+  Future<void> remove(String cacheKey);
+
+  /// Clears all package-managed cached model entries.
+  Future<void> clear();
+
+  /// Prunes cached model entries and returns removed entries.
+  Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes});
+}
+
+/// Base implementation for download managers that do not implement IO yet.
+abstract class ThrowingModelDownloadManager implements ModelDownloadManager {
+  /// Creates a throwing model download manager.
+  const ThrowingModelDownloadManager();
+
+  /// Exception thrown by unsupported operations.
+  Object unsupported(String operation) => LlamaUnsupportedException(
+    'Model downloads are not supported by this implementation: $operation.',
+  );
+
+  @override
+  Future<ModelCacheEntry> ensureModel(
+    ModelSource source, {
+    ModelLoadOptions options = ModelLoadOptions.defaults,
+    ModelDownloadProgressCallback? onProgress,
+  }) async {
+    throw unsupported('ensureModel');
+  }
+
+  @override
+  Future<List<ModelCacheEntry>> list() async {
+    throw unsupported('list');
+  }
+
+  @override
+  Future<ModelCacheEntry?> get(String cacheKey) async {
+    throw unsupported('get');
+  }
+
+  @override
+  Future<void> remove(String cacheKey) async {
+    throw unsupported('remove');
+  }
+
+  @override
+  Future<void> clear() async {
+    throw unsupported('clear');
+  }
+
+  @override
+  Future<List<ModelCacheEntry>> prune({Duration? maxAge, int? maxBytes}) async {
+    throw unsupported('prune');
+  }
+}
+
+String _requiredString(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value is! String) {
+    throw ArgumentError.value(json, 'json', 'Missing required string: $key.');
+  }
+  return value;
+}
+
+DateTime _requiredDateTime(Map<String, Object?> json, String key) {
+  final value = json[key];
+  if (value is! String) {
+    throw ArgumentError.value(
+      json,
+      'json',
+      'Missing required timestamp: $key.',
+    );
+  }
+  return DateTime.parse(value);
+}
+
+DateTime? _optionalDateTime(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is! String) {
+    throw ArgumentError.value(value, 'value', 'Expected ISO-8601 timestamp.');
+  }
+  return DateTime.parse(value);
+}
+
+int? _optionalInt(Object? value) {
+  if (value == null) {
+    return null;
+  }
+  if (value is! int) {
+    throw ArgumentError.value(value, 'value', 'Expected integer.');
+  }
+  return value;
+}
+
+String _metadataSafeSourceKey(String sourceCanonicalKey, String cacheKey) {
+  final candidate = sourceCanonicalKey.startsWith('url:')
+      ? sourceCanonicalKey.substring('url:'.length).split('#').first
+      : sourceCanonicalKey;
+
+  final uri = Uri.tryParse(candidate);
+  if (uri == null || (uri.scheme != 'http' && uri.scheme != 'https')) {
+    return sourceCanonicalKey;
+  }
+
+  final redactedUri = Uri(
+    scheme: uri.scheme,
+    host: uri.host,
+    port: uri.hasPort ? uri.port : null,
+    path: uri.path,
+  );
+  return 'url:${redactedUri.toString()}#cacheKey=$cacheKey';
+}
+
+String _validatedCacheFileName(String fileName) {
+  final decoded = Uri.decodeComponent(fileName);
+  if (decoded.isEmpty ||
+      decoded == '.' ||
+      decoded == '..' ||
+      decoded.contains('/') ||
+      decoded.contains(r'\')) {
+    throw ArgumentError.value(
+      fileName,
+      'fileName',
+      'Cache fileName must be a safe basename.',
+    );
+  }
+  return fileName;
+}
+
+String _validatedCacheFilePath(String filePath) {
+  if (filePath.isEmpty) {
+    throw ArgumentError.value(
+      filePath,
+      'filePath',
+      'Cache filePath must not be empty.',
+    );
+  }
+  final normalized = filePath.replaceAll(r'\', '/');
+  for (final segment in normalized.split('/')) {
+    if (segment.isEmpty) {
+      continue;
+    }
+    final decoded = Uri.decodeComponent(segment);
+    if (decoded == '.' || decoded == '..') {
+      throw ArgumentError.value(
+        filePath,
+        'filePath',
+        'Cache filePath must not contain traversal segments.',
+      );
+    }
+  }
+  return filePath;
+}

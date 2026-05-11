@@ -26,6 +26,8 @@
   - Web: WebGPU via bridge runtime (with CPU fallback)
 - 🧭 **Embeddings API**: Generate vectors with `embed(...)` and
   `embedBatch(...)`.
+- 📦 **Structured Model Sources**: Describe local, HTTP(S), and Hugging Face
+  GGUF sources with deterministic cache identities for download/cache workflows.
 - 🖼️ **Multimodal Support**: Vision/audio model runtime support.
 - **LoRA Support**: Runtime GGUF adapter application.
 - 🔇 **Split Logging Control**: Dart logs and native logs can be configured independently.

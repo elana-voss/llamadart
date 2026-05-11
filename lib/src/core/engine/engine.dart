@@ -14,6 +14,10 @@ import '../llama_logger.dart';
 import '../models/inference/model_params.dart';
 import '../models/inference/generation_params.dart';
 import '../models/inference/tool_choice.dart';
+import '../models/model_load_options.dart';
+import '../models/model_resolver.dart';
+import '../models/model_source.dart';
+import '../models/download/model_download_manager_base.dart';
 import '../models/tools/tool_definition.dart';
 
 enum _ToolStreamingMode { undecided, raw, parsed }
@@ -65,6 +69,9 @@ class _ThinkingSplitResult {
 class LlamaEngine {
   /// The backend implementation used for inference.
   final LlamaBackend backend;
+
+  /// Resolves source-aware model loading requests.
+  final ModelResolver modelResolver;
   int? _modelHandle;
   int? _contextHandle;
   int? _mmContextHandle;
@@ -88,7 +95,8 @@ class LlamaEngine {
   }
 
   /// Creates a new [LlamaEngine] instance with the given [backend].
-  LlamaEngine(this.backend);
+  LlamaEngine(this.backend, {ModelResolver? modelResolver})
+    : modelResolver = modelResolver ?? const DefaultModelResolver();
 
   /// Sets both Dart and native log levels to [level].
   ///
@@ -163,6 +171,52 @@ class LlamaEngine {
     }
   }
 
+  /// Loads a model from a structured [source].
+  ///
+  /// Local path sources are dispatched through [loadModel]. Remote URL targets
+  /// are dispatched through [loadModelFromUrl] when the backend supports URL
+  /// loading. Native download/cache IO is intentionally left for later tasks.
+  Future<void> loadModelSource(
+    ModelSource source, {
+    ModelParams modelParams = const ModelParams(),
+    ModelLoadOptions options = ModelLoadOptions.defaults,
+    ModelDownloadProgressCallback? onProgress,
+  }) async {
+    final target = await modelResolver.resolve(
+      source,
+      ModelResolveRequest(options: options, onProgress: onProgress),
+    );
+
+    switch (target) {
+      case LocalModelFile(:final path):
+        if (backend.supportsUrlLoading) {
+          throw LlamaUnsupportedException(
+            'Explicit local model paths are not supported by URL-loading backends.',
+          );
+        }
+        return loadModel(path, modelParams: modelParams);
+      case RemoteModelUrl(:final url, :final useBrowserCache):
+        if (!useBrowserCache) {
+          throw LlamaUnsupportedException(
+            'Remote model loading without browser/backend cache is not supported yet.',
+          );
+        }
+        if (!backend.supportsUrlLoading) {
+          throw LlamaUnsupportedException(
+            'Resolved remote model URLs require a backend that supports URL loading.',
+          );
+        }
+        return loadModelFromUrl(
+          url.toString(),
+          modelParams: modelParams,
+          onProgress: onProgress == null
+              ? null
+              : (progress) =>
+                    onProgress(ModelDownloadProgress.fraction(progress)),
+        );
+    }
+  }
+
   /// Loads a model from a [url].
   ///
   /// This is typically used on the Web platform. Use [ModelParams] to
@@ -173,18 +227,19 @@ class LlamaEngine {
     Function(double progress)? onProgress,
   }) async {
     final modelName = _displayNameForSource(url);
+    final redactedUrl = _redactedUriForLogs(url);
     LlamaLogger.instance.info('Loading model from URL: $modelName');
 
     if (!backend.supportsUrlLoading) {
-      throw UnimplementedError(
-        "loadModelFromUrl for Native should be handled by the caller or a helper.",
+      throw LlamaUnsupportedException(
+        'loadModelFromUrl requires a backend that supports URL loading.',
       );
     }
 
     try {
       await backend.setLogLevel(_nativeLogLevel);
       _ensureNotReady();
-      _modelPath = url;
+      _modelPath = redactedUrl;
       _cachedModelMetadata = null;
 
       _modelHandle = await backend.modelLoadFromUrl(
@@ -196,17 +251,17 @@ class LlamaEngine {
       _isReady = true;
 
       LlamaLogger.instance.info(
-        'Model $modelName loaded successfully from $url',
+        'Model $modelName loaded successfully from $redactedUrl',
       );
     } catch (e, stackTrace) {
       await _cleanupFailedLoadState();
 
       LlamaLogger.instance.error(
-        'Failed to load model $modelName from URL $url',
-        e,
+        'Failed to load model $modelName from URL $redactedUrl',
+        null,
         stackTrace,
       );
-      throw LlamaModelException("Failed to load model from $url", e);
+      throw LlamaModelException('Failed to load model from $redactedUrl');
     }
   }
 
@@ -1171,6 +1226,19 @@ class LlamaEngine {
     final segments = normalizedSource.split('/');
     final lastSegment = segments.isNotEmpty ? segments.last : source;
     return lastSegment.isNotEmpty ? lastSegment : source;
+  }
+
+  String _redactedUriForLogs(String source) {
+    final uri = Uri.tryParse(source);
+    if (uri == null || !uri.hasScheme) {
+      return _displayNameForSource(source);
+    }
+    return Uri(
+      scheme: uri.scheme,
+      host: uri.hasAuthority ? uri.host : null,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+    ).toString();
   }
 
   int? _firstNonWhitespaceIndex(String value) {

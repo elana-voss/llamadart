@@ -9,6 +9,14 @@ For canonical full release notes, use:
 
 ## 0.6.12
 
+- Added the model source API foundation: `ModelSource`, `ModelLoadOptions`,
+  `ModelCachePolicy`, resolver targets, and download/cache value models for
+  future package-managed model download and cache flows.
+- Added `LlamaEngine.loadModelSource(...)` so local path sources keep using the
+  existing native loader while remote HTTP(S)/Hugging Face sources can route
+  through URL-capable backends. Native download/cache IO is still intentionally
+  unsupported in this foundation phase and unsupported cache/auth/checksum/retry
+  options fail explicitly.
 - Synced default WebGPU bridge asset pinning to
   `leehack/llama-web-bridge-assets@v0.1.14` (llama.cpp `b9016`) to match the
   native runtime pin.
@@ -27,7 +35,8 @@ For canonical full release notes, use:
   CUDA runtime DLLs and OpenBLAS runtime libraries are emitted only when their
   owning backend module is selected, while unknown runtime libraries stay
   bundled for forward compatibility.
-- Compatibility note: no public API breaking changes in `0.6.12`.
+- Compatibility note: no public API breaking changes in `0.6.12`; existing
+  `loadModel(...)` callers are unchanged.
 
 ## 0.6.11
 

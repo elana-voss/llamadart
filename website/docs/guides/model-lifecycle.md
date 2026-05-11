@@ -36,6 +36,42 @@ await engine.loadModelFromUrl(
 
 `loadModelFromUrl` requires a backend with URL loading support.
 
+## Structured model sources
+
+Use `loadModelSource(...)` when the caller wants to describe the model location
+as a value object instead of branching on raw strings:
+
+```dart
+await engine.loadModelSource(ModelSource.path('/path/to/model.gguf'));
+
+await engine.loadModelSource(
+  ModelSource.url(Uri.parse('https://example.com/model.gguf')),
+  onProgress: (progress) {
+    final fraction = progress.fraction;
+    if (fraction != null) {
+      print('download progress: ${(fraction * 100).toStringAsFixed(1)}%');
+    }
+  },
+);
+
+await engine.loadModelSource(
+  ModelSource.parse('hf://owner/repo/path/to/model.gguf'),
+);
+```
+
+`ModelSource.parse(...)` accepts local paths, HTTP(S) URLs, and `hf://`
+Hugging Face references. Source values expose deterministic cache keys and
+redacted metadata identities so signed URL query strings are not stored in logs
+or cache metadata.
+
+This release adds the API foundation only. Local sources still use the existing
+native `loadModel(...)` path, while remote sources require a backend that already
+supports URL loading. Package-managed native download/cache IO, authenticated
+requests, checksum verification, refresh/cache-only/no-cache policies, and
+custom retry/resume behavior are reserved for a later implementation phase and
+currently fail with `LlamaUnsupportedException` when requested through the
+default resolver.
+
 ## Multimodal projector lifecycle
 
 ```dart

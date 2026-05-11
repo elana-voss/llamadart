@@ -17,6 +17,7 @@ class MockLlamaBackend
 
   bool _isReady = false;
   String? lastLoraPath;
+  String? lastModelUrl;
   double? lastLoraScale;
   int resolvedGpuLayers = 0;
   int modelLoadCalls = 0;
@@ -54,8 +55,10 @@ class MockLlamaBackend
     Function(double progress)? onProgress,
   }) async {
     modelLoadFromUrlCalls += 1;
+    lastModelUrl = url;
+    onProgress?.call(0.25);
     if (failModelLoadFromUrl) {
-      throw Exception('url model load failed');
+      throw Exception('url model load failed: $url');
     }
     _isReady = true;
     return 1;
@@ -300,10 +303,26 @@ void main() {
       expect(webEngine.isReady, isTrue);
     });
 
-    test('loadModelFromUrl successful', () async {
+    test(
+      'loadModelSource rejects explicit local paths on URL backends',
+      () async {
+        final webBackend = MockLlamaBackend(urlLoadingSupported: true);
+        final webEngine = LlamaEngine(webBackend);
+
+        await expectLater(
+          () =>
+              webEngine.loadModelSource(ModelSource.path('/models/model.gguf')),
+          throwsA(isA<LlamaUnsupportedException>()),
+        );
+        expect(webBackend.modelLoadCalls, 0);
+        expect(webBackend.modelLoadFromUrlCalls, 0);
+      },
+    );
+
+    test('loadModelFromUrl unsupported on non-URL backend', () async {
       expect(
         () => engine.loadModelFromUrl('http://test.gguf'),
-        throwsUnimplementedError,
+        throwsA(isA<LlamaUnsupportedException>()),
       );
     });
 
@@ -321,6 +340,87 @@ void main() {
         expect(webEngine.isReady, isTrue);
         expect(webEngine.modelHandle, isNotNull);
         expect(webEngine.contextHandle, isNotNull);
+      },
+    );
+
+    test(
+      'loadModelFromUrl redacts completion model metadata for signed URLs',
+      () async {
+        final webBackend = MockLlamaBackend(urlLoadingSupported: true)
+          ..generationText = 'hello';
+        final webEngine = LlamaEngine(webBackend);
+
+        await webEngine.loadModelFromUrl(
+          'https://user:secret@example.com/model.gguf?token=abc123#fragment',
+        );
+        final chunks = await webEngine.create(const [
+          LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+        ]).toList();
+
+        expect(chunks, isNotEmpty);
+        for (final chunk in chunks) {
+          expect(chunk.model, 'https://example.com/model.gguf');
+          expect(chunk.model, isNot(contains('secret')));
+          expect(chunk.model, isNot(contains('token=abc123')));
+        }
+      },
+    );
+
+    test('loadModelSource forwards progress for remote URL targets', () async {
+      final webBackend = MockLlamaBackend(urlLoadingSupported: true);
+      final webEngine = LlamaEngine(webBackend);
+      final progressEvents = <ModelDownloadProgress>[];
+
+      await webEngine.loadModelSource(
+        ModelSource.url(Uri.parse('https://example.com/model.gguf')),
+        onProgress: progressEvents.add,
+      );
+
+      expect(webBackend.lastModelUrl, 'https://example.com/model.gguf');
+      expect(progressEvents, hasLength(1));
+      expect(progressEvents.single.receivedBytes, 0);
+      expect(progressEvents.single.totalBytes, isNull);
+      expect(progressEvents.single.fraction, 0.25);
+    });
+
+    test(
+      'loadModelSource rejects unsupported noCache remote URL option',
+      () async {
+        final webBackend = MockLlamaBackend(urlLoadingSupported: true);
+        final webEngine = LlamaEngine(webBackend);
+
+        await expectLater(
+          () => webEngine.loadModelSource(
+            ModelSource.url(Uri.parse('https://example.com/model.gguf')),
+            options: ModelLoadOptions(cachePolicy: ModelCachePolicy.noCache),
+          ),
+          throwsA(isA<LlamaUnsupportedException>()),
+        );
+      },
+    );
+
+    test(
+      'loadModelFromUrl redacts credentials from thrown exception messages',
+      () async {
+        final failingBackend = MockLlamaBackend(
+          urlLoadingSupported: true,
+          failModelLoadFromUrl: true,
+        );
+        final failingEngine = LlamaEngine(failingBackend);
+
+        Object? thrown;
+        try {
+          await failingEngine.loadModelFromUrl(
+            'https://user:secret@example.com/model.gguf?token=abc123#fragment',
+          );
+        } catch (e) {
+          thrown = e;
+        }
+
+        expect(thrown, isA<LlamaModelException>());
+        expect(thrown.toString(), isNot(contains('secret')));
+        expect(thrown.toString(), isNot(contains('token=abc123')));
+        expect(thrown.toString(), contains('https://example.com/model.gguf'));
       },
     );
 
