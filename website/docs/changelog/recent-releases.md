@@ -7,6 +7,24 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
+## Unreleased
+
+- Added package-managed model source downloads and cache management:
+  `ModelSource`, `ModelLoadOptions`, `ModelCachePolicy`, resolver targets,
+  download/cache metadata, progress callbacks, cache inspection, removal,
+  clearing, and age/size pruning.
+- Added native/file-backed `DefaultModelDownloadManager` support for streaming
+  HTTP downloads, `.part` files with atomic promotion, authenticated bearer and
+  custom headers, cooperative cancellation, retry, HTTP Range resume, cache
+  hit/refresh/cache-only/no-cache policies, SHA-256 verification, and persisted
+  redacted metadata for signed URLs.
+- Added `LlamaEngine.loadModelSource(...)` so local path sources keep using the
+  existing native loader, remote HTTP(S)/Hugging Face sources download through
+  the package-managed native cache before local loading, and URL-capable web
+  backends keep using direct URL loading for simple unauthenticated requests.
+- Compatibility note: no public API breaking changes; existing
+  `loadModel(...)` callers are unchanged.
+
 ## 0.6.12
 
 - Synced default WebGPU bridge asset pinning to
