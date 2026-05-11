@@ -32,8 +32,33 @@ class ModelServiceWeb implements ModelService {
   ) async {
     final prefs = await SharedPreferences.getInstance();
     final downloaded = prefs.getStringList(_downloadedModelsKey) ?? const [];
-    final valid = models.map((m) => m.filename).toSet();
-    return downloaded.where(valid.contains).toSet();
+    return models
+        .where((model) => _isProfileCached(model, downloaded.toSet()))
+        .map((model) => model.filename)
+        .toSet();
+  }
+
+  bool _isProfileCached(DownloadableModel model, Set<String> downloaded) {
+    final sources = _remoteSourcesFor(model);
+    if (sources.length != _assetSourcesFor(model).length) {
+      return false;
+    }
+
+    return sources.every((source) => downloaded.contains(source.cacheKey));
+  }
+
+  List<ModelAssetSource> _assetSourcesFor(DownloadableModel model) {
+    return <ModelAssetSource>[
+      model.modelSource,
+      if (model.multimodalProjectorSource != null)
+        model.multimodalProjectorSource!,
+    ];
+  }
+
+  List<RemoteModelAssetSource> _remoteSourcesFor(DownloadableModel model) {
+    return _assetSourcesFor(
+      model,
+    ).whereType<RemoteModelAssetSource>().toList(growable: false);
   }
 
   @override
@@ -46,7 +71,17 @@ class ModelServiceWeb implements ModelService {
     required Function(String filename) onSuccess,
     required Function(dynamic error) onError,
   }) async {
-    final hasMmproj = model.mmprojUrl != null && model.mmprojUrl!.isNotEmpty;
+    final modelSource = model.modelSource;
+    final assetSources = _assetSourcesFor(model);
+    if (assetSources.any((source) => source is! RemoteModelAssetSource)) {
+      onError(
+        UnsupportedError('Web downloads require remote URLs for all assets'),
+      );
+      return;
+    }
+    final remoteModelSource = modelSource as RemoteModelAssetSource;
+    final mmprojSource = model.multimodalProjectorSource;
+    final hasMmproj = mmprojSource is RemoteModelAssetSource;
     final stageCount = hasMmproj ? 2 : 1;
     final aggregate = ModelDownloadProgressTracker(
       includeMmproj: hasMmproj,
@@ -70,7 +105,7 @@ class ModelServiceWeb implements ModelService {
 
           await _prefetchStage(
             bridge,
-            model.url,
+            remoteModelSource.url,
             stage: ModelDownloadStage.model,
             stageIndex: 1,
             stageCount: stageCount,
@@ -83,7 +118,7 @@ class ModelServiceWeb implements ModelService {
           if (hasMmproj) {
             await _prefetchStage(
               bridge,
-              model.mmprojUrl!,
+              mmprojSource.url,
               stage: ModelDownloadStage.multimodalProjector,
               stageIndex: 2,
               stageCount: stageCount,
@@ -104,7 +139,7 @@ class ModelServiceWeb implements ModelService {
 
       if (!usedBridgePrefetch) {
         await _verifyRemoteStage(
-          model.url,
+          remoteModelSource.url,
           stage: ModelDownloadStage.model,
           stageIndex: 1,
           stageCount: stageCount,
@@ -117,7 +152,7 @@ class ModelServiceWeb implements ModelService {
 
         if (hasMmproj) {
           await _verifyRemoteStage(
-            model.mmprojUrl!,
+            mmprojSource.url,
             stage: ModelDownloadStage.multimodalProjector,
             stageIndex: 2,
             stageCount: stageCount,
@@ -136,16 +171,16 @@ class ModelServiceWeb implements ModelService {
 
       final prefs = await SharedPreferences.getInstance();
       final downloaded =
-          prefs.getStringList(_downloadedModelsKey) ?? <String>[];
-      if (!downloaded.contains(model.filename)) {
-        downloaded.add(model.filename);
-        await prefs.setStringList(_downloadedModelsKey, downloaded);
+          prefs.getStringList(_downloadedModelsKey)?.toSet() ?? <String>{};
+      for (final source in _remoteSourcesFor(model)) {
+        downloaded.add(source.cacheKey);
       }
+      await prefs.setStringList(_downloadedModelsKey, downloaded.toList());
 
       onSuccess(model.filename);
     } catch (error) {
       if (_looksCancelled(error) || cancelToken.isCancelled) {
-        onError(_cancelledException(model.url));
+        onError(_cancelledException(remoteModelSource.url));
       } else {
         onError(error);
       }
@@ -312,11 +347,24 @@ class ModelServiceWeb implements ModelService {
 
   DioException _cancelledException(String url) {
     return DioException(
-      requestOptions: RequestOptions(path: url),
+      requestOptions: RequestOptions(path: _redactedUrl(url)),
       type: DioExceptionType.cancel,
       message: 'Download cancelled',
       error: 'Download cancelled',
     );
+  }
+
+  String _redactedUrl(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !uri.hasScheme) {
+      return url.split('?').first.split('#').first;
+    }
+    return Uri(
+      scheme: uri.scheme,
+      host: uri.host,
+      port: uri.hasPort ? uri.port : null,
+      path: uri.path,
+    ).toString();
   }
 
   Future<void> _verifyRemoteStage(
@@ -396,9 +444,13 @@ class ModelServiceWeb implements ModelService {
   @override
   Future<void> deleteModel(String modelsDir, DownloadableModel model) async {
     final prefs = await SharedPreferences.getInstance();
-    final downloaded = prefs.getStringList(_downloadedModelsKey) ?? <String>[];
+    final downloaded =
+        prefs.getStringList(_downloadedModelsKey)?.toSet() ?? <String>{};
     downloaded.remove(model.filename);
-    await prefs.setStringList(_downloadedModelsKey, downloaded);
+    for (final source in _remoteSourcesFor(model)) {
+      downloaded.remove(source.cacheKey);
+    }
+    await prefs.setStringList(_downloadedModelsKey, downloaded.toList());
 
     final bridge = _tryCreateBridge();
     if (bridge == null) {
@@ -406,21 +458,13 @@ class ModelServiceWeb implements ModelService {
     }
 
     try {
-      final modelEvictPromise = bridge.evictModelFromCache(
-        model.url,
-        _WebModelCacheOptions(cacheName: _modelCacheName.toJS),
-      );
-      if (modelEvictPromise != null) {
-        await modelEvictPromise.toDart;
-      }
-
-      if (model.mmprojUrl != null && model.mmprojUrl!.isNotEmpty) {
-        final mmprojEvictPromise = bridge.evictModelFromCache(
-          model.mmprojUrl!,
+      for (final source in _remoteSourcesFor(model)) {
+        final evictPromise = bridge.evictModelFromCache(
+          source.url,
           _WebModelCacheOptions(cacheName: _modelCacheName.toJS),
         );
-        if (mmprojEvictPromise != null) {
-          await mmprojEvictPromise.toDart;
+        if (evictPromise != null) {
+          await evictPromise.toDart;
         }
       }
     } catch (_) {

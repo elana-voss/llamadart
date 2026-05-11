@@ -225,6 +225,38 @@ void main() {
     expect(tempFile.existsSync(), isFalse); // Should be cleaned up
   });
 
+  test('Remote model can depend on local mmproj availability', () async {
+    final localMmproj = File(p.join(tempDir.path, 'local-mmproj.gguf'));
+    final model = DownloadableModel.fromSources(
+      name: 'Mixed Source VLM',
+      description: 'Test',
+      modelSource: RemoteModelAssetSource(
+        url: '$baseUrl/model.gguf',
+        filename: 'mixed-model.gguf',
+        sizeBytes: testDataSize,
+      ),
+      multimodalProjectorSource: LocalModelAssetSource(localMmproj.path),
+      sizeBytes: testDataSize,
+      supportsVision: true,
+    );
+
+    await File(p.join(tempDir.path, 'mixed-model.gguf')).writeAsBytes(testData);
+
+    var downloaded = await service.getDownloadedModels([model]);
+    expect(downloaded, isNot(contains(model.filename)));
+
+    await localMmproj.writeAsBytes(mmprojData);
+    downloaded = await service.getDownloadedModels([model]);
+    expect(downloaded, contains(model.filename));
+
+    await service.deleteModel(tempDir.path, model);
+    expect(
+      File(p.join(tempDir.path, 'mixed-model.gguf')).existsSync(),
+      isFalse,
+    );
+    expect(localMmproj.existsSync(), isTrue);
+  });
+
   test('Incomplete download is not marked as downloaded', () async {
     final model = DownloadableModel(
       name: 'Existing Model',
