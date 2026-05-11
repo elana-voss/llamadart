@@ -671,6 +671,37 @@ void main() {
     );
 
     test(
+      'restarts from byte zero when a resume request receives HTTP 416',
+      () async {
+        final manager = DefaultModelDownloadManager(
+          defaultCacheDirectory: tempDir.path,
+        );
+        final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+        server.payload = utf8.encode('short');
+        server.supportRanges = true;
+        final cacheDir = Directory(
+          path.join(tempDir.path, source.cacheDirectoryName),
+        )..createSync(recursive: true);
+        File(
+          path.join(cacheDir.path, 'tiny.gguf.part'),
+        ).writeAsStringSync('stale-partial');
+        File(path.join(cacheDir.path, 'tiny.gguf.part.json')).writeAsStringSync(
+          '${jsonEncode(<String, Object?>{'etag': server.etag})}\n',
+        );
+
+        final entry = await manager.ensureModel(source);
+
+        expect(server.requestCount, 2);
+        expect(server.rangeHistory, <String?>['bytes=13-', null]);
+        expect(File(entry.filePath).readAsStringSync(), 'short');
+        expect(
+          File(path.join(cacheDir.path, 'tiny.gguf.part.json')).existsSync(),
+          isFalse,
+        );
+      },
+    );
+
+    test(
       'restarts stale partial downloads when resume validators mismatch',
       () async {
         final manager = DefaultModelDownloadManager(
@@ -807,6 +838,7 @@ class _ModelHttpFixture {
   int failureStatusCode = HttpStatus.internalServerError;
   int requestCount = 0;
   String? lastRange;
+  final rangeHistory = <String?>[];
   String? lastIfRange;
   String? lastAuthorization;
   String? lastTestHeader;
@@ -827,6 +859,7 @@ class _ModelHttpFixture {
   void _handleRequest(HttpRequest request) async {
     requestCount += 1;
     lastRange = request.headers.value(HttpHeaders.rangeHeader);
+    rangeHistory.add(lastRange);
     lastIfRange = request.headers.value(HttpHeaders.ifRangeHeader);
     lastAuthorization = request.headers.value(HttpHeaders.authorizationHeader);
     lastTestHeader = request.headers.value('X-Test-Header');
@@ -846,6 +879,15 @@ class _ModelHttpFixture {
     if (supportRanges && range != null && range.startsWith('bytes=')) {
       final startText = range.substring('bytes='.length).split('-').first;
       final start = int.parse(startText);
+      if (start >= payload.length) {
+        request.response.statusCode = HttpStatus.requestedRangeNotSatisfiable;
+        request.response.headers.set(
+          HttpHeaders.contentRangeHeader,
+          'bytes */${payload.length}',
+        );
+        await request.response.close();
+        return;
+      }
       request.response.statusCode = HttpStatus.partialContent;
       request.response.headers.set(HttpHeaders.acceptRangesHeader, 'bytes');
       request.response.headers.set(

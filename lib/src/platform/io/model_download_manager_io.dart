@@ -459,6 +459,21 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
         if (partMetadataFile != null) {
           await _deleteIfExists(partMetadataFile);
         }
+      } else if (existingBytes > 0 &&
+          statusCode == HttpStatus.requestedRangeNotSatisfiable) {
+        await response.drain<void>();
+        await _deleteIfExists(downloadFile);
+        if (partMetadataFile != null) {
+          await _deleteIfExists(partMetadataFile);
+        }
+        return _downloadOnce(
+          source,
+          options,
+          uri,
+          finalFile,
+          partFile,
+          onProgress,
+        );
       } else if (statusCode != HttpStatus.ok) {
         throw LlamaModelException(
           'Failed to download ${source.displayName}: HTTP $statusCode.',
