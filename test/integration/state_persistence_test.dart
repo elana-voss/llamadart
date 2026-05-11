@@ -43,15 +43,30 @@ void main() async {
   });
 
   test('saves and loads KV state, recovering the original tokens', () async {
-    // Seed the context by tokenizing a known prompt and saving state.
-    final tokens = await engine.tokenize('Once upon a time in a quiet land');
+    // Tokenization alone does not populate the KV cache; seed it by running
+    // a short generate so the persisted file actually contains real state.
+    const prompt = 'Once upon a time in a quiet land';
+    final tokens = await engine.tokenize(prompt);
     expect(tokens, isNotEmpty);
+
+    await engine
+        .generate(
+          prompt,
+          params: const GenerationParams(maxTokens: 2, reusePromptPrefix: true),
+        )
+        .drain<void>();
 
     final savePath = '${tmpDir.path}/state.bin';
     final saved = await engine.stateSaveFile(savePath, tokens: tokens);
     expect(saved, isTrue, reason: 'stateSaveFile should succeed');
     expect(File(savePath).existsSync(), isTrue);
-    expect(File(savePath).lengthSync(), greaterThan(0));
+    // A file holding real KV state for a non-empty prompt is far larger than
+    // the bare token list; reject the trivial token-roundtrip case.
+    expect(
+      File(savePath).lengthSync(),
+      greaterThan(tokens.length * 8),
+      reason: 'saved state must contain KV data, not just the token header',
+    );
 
     final result = await engine.stateLoadFile(savePath, tokenCapacity: 256);
     expect(result.tokens, equals(tokens));
@@ -74,67 +89,164 @@ void main() async {
   });
 
   test(
-    'generate after stateLoadFile reuses KV prefix, not full prompt eval',
+    'fresh engine resumes from saved state without re-evaluating the prompt',
     () async {
       const prompt = 'Once upon a time in a land far away';
 
-      // Evaluate the prompt into the KV cache via a short generation.
-      final tokens = await engine.tokenize(prompt);
-      await engine
-          .generate(
-            prompt,
-            params: const GenerationParams(
-              maxTokens: 3,
-              reusePromptPrefix: true,
-            ),
-          )
-          .drain<void>();
-      final fullPerf = await engine.getPerformanceContext();
-      final fullEvalTokens = fullPerf?.promptEvalTokens ?? 0;
-      expect(
-        fullEvalTokens,
-        greaterThan(1),
-        reason: 'first generate must evaluate the prompt',
-      );
+      // --- Engine A: seed the KV cache and persist it to disk. ---
+      final engineA = LlamaEngine(LlamaBackend());
+      LlamaEngine? engineB;
+      try {
+        await engineA.loadModel(
+          modelFile.path,
+          modelParams: const ModelParams(contextSize: 256),
+        );
 
-      // Save the KV state together with the producing token sequence.
-      final savePath = '${tmpDir.path}/kv_reuse.bin';
-      expect(await engine.stateSaveFile(savePath, tokens: tokens), isTrue);
+        final tokens = await engineA.tokenize(prompt);
+        await engineA
+            .generate(
+              prompt,
+              params: const GenerationParams(
+                maxTokens: 3,
+                reusePromptPrefix: true,
+              ),
+            )
+            .drain<void>();
+        final perfA = await engineA.getPerformanceContext();
+        final fullEvalTokens = perfA?.promptEvalTokens ?? 0;
+        expect(
+          fullEvalTokens,
+          greaterThan(1),
+          reason: 'engine A must evaluate the prompt',
+        );
 
-      // Load the state — this must seed cachedPromptTokens.
-      final loadResult = await engine.stateLoadFile(
-        savePath,
-        tokenCapacity: 512,
-      );
-      expect(loadResult.tokens, equals(tokens));
+        final savePath = '${tmpDir.path}/kv_reuse_fresh.bin';
+        expect(await engineA.stateSaveFile(savePath, tokens: tokens), isTrue);
 
-      // Generate with prompt + a short suffix.  If cachedPromptTokens was
-      // seeded correctly the KV prefix is already in place and only the suffix
-      // tokens are evaluated, not the full prompt.  We use the native
-      // n_p_eval counter (returned when > 0) which reflects the actual decode
-      // count for this call; the Dart fallback always returns the full prompt
-      // length so we need at least one suffix token to get a native reading.
-      const suffix = ' and they';
-      await engine
-          .generate(
-            prompt + suffix,
-            params: const GenerationParams(
-              maxTokens: 3,
-              reusePromptPrefix: true,
-            ),
-          )
-          .drain<void>();
-      final cachedPerf = await engine.getPerformanceContext();
-      final cachedEvalTokens = cachedPerf?.promptEvalTokens ?? fullEvalTokens;
+        // Drop engine A so the next decode genuinely starts cold — no
+        // warmed KV cache in memory to mask a regression in stateLoadFile.
+        await engineA.dispose();
 
-      // Only the suffix tokens should have been evaluated (not the full prompt).
-      expect(
-        cachedEvalTokens,
-        lessThan(fullEvalTokens),
-        reason:
-            'generate after stateLoadFile should reuse the KV prefix; '
-            'only suffix tokens should be evaluated, not the full prompt',
-      );
+        // --- Engine B: cold start, load the persisted state, resume. ---
+        engineB = LlamaEngine(LlamaBackend());
+        await engineB.loadModel(
+          modelFile.path,
+          modelParams: const ModelParams(contextSize: 256),
+        );
+
+        final loadResult = await engineB.stateLoadFile(
+          savePath,
+          tokenCapacity: 512,
+        );
+        expect(
+          loadResult.tokens,
+          equals(tokens),
+          reason: 'loaded tokens must round-trip on a fresh engine',
+        );
+
+        // Generate with prompt + a short suffix on the fresh engine. If
+        // cachedPromptTokens was seeded by stateLoadFile, only the suffix
+        // is decoded; otherwise the full prompt re-evaluates. We use the
+        // native n_p_eval counter (returned when > 0) which reflects the
+        // actual decode count for this call; the Dart fallback returns
+        // the full prompt length so we need at least one suffix token to
+        // get a native reading.
+        const suffix = ' and they';
+        await engineB
+            .generate(
+              prompt + suffix,
+              params: const GenerationParams(
+                maxTokens: 3,
+                reusePromptPrefix: true,
+              ),
+            )
+            .drain<void>();
+        final perfB = await engineB.getPerformanceContext();
+        final cachedEvalTokens = perfB?.promptEvalTokens ?? fullEvalTokens;
+
+        expect(
+          cachedEvalTokens,
+          lessThan(fullEvalTokens),
+          reason:
+              'fresh-engine generate after stateLoadFile must reuse the '
+              'KV prefix; only suffix tokens should be evaluated, not the '
+              'full prompt',
+        );
+      } finally {
+        // Dispose explicitly; do not use addTearDown to avoid a
+        // double-dispose hang on the (already-disposed) engineA.
+        if (engineB != null) {
+          await engineB.dispose();
+        }
+      }
+    },
+  );
+
+  test(
+    'exact-prompt resume samples without re-decoding the cached prefix',
+    () async {
+      const prompt = 'Once upon a time in a small village';
+
+      final engineA = LlamaEngine(LlamaBackend());
+      LlamaEngine? engineB;
+      try {
+        await engineA.loadModel(
+          modelFile.path,
+          modelParams: const ModelParams(contextSize: 256),
+        );
+
+        final tokens = await engineA.tokenize(prompt);
+        await engineA
+            .generate(
+              prompt,
+              params: const GenerationParams(
+                maxTokens: 2,
+                reusePromptPrefix: true,
+              ),
+            )
+            .drain<void>();
+
+        final savePath = '${tmpDir.path}/exact_match.bin';
+        expect(await engineA.stateSaveFile(savePath, tokens: tokens), isTrue);
+        await engineA.dispose();
+
+        engineB = LlamaEngine(LlamaBackend());
+        await engineB.loadModel(
+          modelFile.path,
+          modelParams: const ModelParams(contextSize: 256),
+        );
+
+        await engineB.stateLoadFile(savePath, tokenCapacity: 512);
+
+        // Re-issue the EXACT same prompt — reusedPrefix == nTokens. The
+        // exact-match branch must NOT clear the restored KV cache; only the
+        // final token is re-decoded so the sampler has fresh logits. We
+        // assert this by checking that the native prompt-eval token count
+        // is below the full prompt length (it should be 1, but allow slack
+        // for the Dart fallback path).
+        await engineB
+            .generate(
+              prompt,
+              params: const GenerationParams(
+                maxTokens: 2,
+                reusePromptPrefix: true,
+              ),
+            )
+            .drain<void>();
+        final perf = await engineB.getPerformanceContext();
+        final evalTokens = perf?.promptEvalTokens ?? tokens.length;
+        expect(
+          evalTokens,
+          lessThan(tokens.length),
+          reason:
+              'exact-match resume must re-decode at most one trailing token, '
+              'not the full restored prefix',
+        );
+      } finally {
+        if (engineB != null) {
+          await engineB.dispose();
+        }
+      }
     },
   );
 }
