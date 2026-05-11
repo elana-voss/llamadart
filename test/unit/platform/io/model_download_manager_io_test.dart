@@ -402,6 +402,42 @@ void main() {
       },
     );
 
+    test('failed noCache download removes transient cache directory', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: tempDir.path,
+      );
+      final source = ModelSource.url(server.modelUri, fileName: 'tiny.gguf');
+      server.failuresBeforeSuccess = 1;
+      server.failureStatusCode = HttpStatus.badRequest;
+
+      await expectLater(
+        manager.ensureModel(
+          source,
+          options: ModelLoadOptions(cachePolicy: ModelCachePolicy.noCache),
+        ),
+        throwsA(isA<LlamaModelException>()),
+      );
+
+      expect(
+        tempDir.listSync().whereType<Directory>().where(
+          (dir) => path
+              .basename(dir.path)
+              .startsWith('${source.cacheDirectoryName}-nocache-'),
+        ),
+        isEmpty,
+      );
+    });
+
+    test('prune on missing cache root returns empty list', () async {
+      final manager = DefaultModelDownloadManager(
+        defaultCacheDirectory: path.join(tempDir.path, 'missing-cache-root'),
+      );
+
+      final removed = await manager.prune(maxBytes: 1);
+
+      expect(removed, isEmpty);
+    });
+
     test(
       'get finds newest matching cache entry without full metadata scan',
       () async {

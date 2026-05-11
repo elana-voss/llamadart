@@ -64,18 +64,25 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       );
       final transientFile = File(path.join(transientDir.path, source.fileName));
       final transientPartFile = File('${transientFile.path}.part');
-      final entry = await _download(
-        source,
-        options,
-        transientFile,
-        transientPartFile,
-        onProgress,
-      );
-      await _writeMetadata(
-        File(path.join(transientDir.path, _metadataFileName)),
-        entry,
-      );
-      return entry;
+      try {
+        final entry = await _download(
+          source,
+          options,
+          transientFile,
+          transientPartFile,
+          onProgress,
+        );
+        await _writeMetadata(
+          File(path.join(transientDir.path, _metadataFileName)),
+          entry,
+        );
+        return entry;
+      } catch (_) {
+        if (await transientDir.exists()) {
+          await transientDir.delete(recursive: true);
+        }
+        rethrow;
+      }
     }
 
     await cacheDir.create(recursive: true);
@@ -579,7 +586,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
   ) async {
     final root = _rootDirectory(cacheDirectory);
     if (!await root.exists()) {
-      return const <ModelCacheEntry>[];
+      return <ModelCacheEntry>[];
     }
 
     final removed = <ModelCacheEntry>[];
