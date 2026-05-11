@@ -26,6 +26,8 @@
   - Web: WebGPU via bridge runtime (with CPU fallback)
 - 🧭 **Embeddings API**: Generate vectors with `embed(...)` and
   `embedBatch(...)`.
+- 📦 **Structured Model Sources**: Describe local, HTTP(S), and Hugging Face
+  GGUF sources with deterministic cache identities for download/cache workflows.
 - 💾 **Native State Persistence**: Save and restore llama.cpp KV-cache state
   with `stateSaveFile(...)` / `stateLoadFile(...)` for fast raw-prompt resumes.
 - 🖼️ **Multimodal Support**: Vision/audio model runtime support.
@@ -90,7 +92,41 @@ Future<void> main() async {
 }
 ```
 
-### 5. Generate embeddings
+### 5. Download and cache a remote GGUF
+
+```dart
+import 'package:llamadart/llamadart.dart';
+
+Future<void> main() async {
+  final engine = LlamaEngine(LlamaBackend());
+  try {
+    await engine.loadModelSource(
+      ModelSource.parse('hf://owner/repo/model-Q4_K_M.gguf'),
+      options: ModelLoadOptions(
+        cachePolicy: ModelCachePolicy.preferCached,
+        cacheDirectory: '/path/to/app/model-cache',
+      ),
+      onProgress: (progress) {
+        final fraction = progress.fraction;
+        if (fraction != null) {
+          print('download ${(fraction * 100).toStringAsFixed(1)}%');
+        }
+      },
+    );
+  } finally {
+    await engine.dispose();
+  }
+}
+```
+
+Native/file-backed backends stream remote models into the package-managed cache,
+resume partial `.part` downloads when the server supports HTTP Range and the
+partial has a safe validator (ETag/Last-Modified) or caller-provided SHA-256,
+verify optional SHA-256 checksums, and redact signed URL credentials from
+metadata. Validator-less partial files restart from byte zero instead of being
+appended.
+
+### 6. Generate embeddings
 
 ```dart
 import 'package:llamadart/llamadart.dart';
@@ -120,7 +156,7 @@ Note: embedding support depends on backend/runtime capabilities.
 - Web runtime requires bridge assets with embedding APIs (`v0.1.7` or newer).
 - See the full guide: https://llamadart.leehack.com/docs/guides/embeddings
 
-### 6. Optional: save and restore native KV-cache state
+### 7. Optional: save and restore native KV-cache state
 
 Native backends can persist llama.cpp KV-cache state for fast raw-prompt
 resume/fork workflows:

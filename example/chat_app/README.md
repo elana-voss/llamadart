@@ -38,6 +38,14 @@ flutter test
 
 Note: this is a Flutter app, so use `flutter test` (not `dart test`).
 
+Slow device E2E tests are tagged `local-only` and skipped by default. To run
+the real model/mmproj download-cache-load check manually on a selected device:
+
+```bash
+flutter test --run-skipped -t local-only \
+  integration_test/model_cache_mmproj_e2e_test.dart -d <device>
+```
+
 ### 2. Choose and Download a Model
 1. The app will open to a **Manage Models** screen.
 2. Select one of the pre-configured models (for example: FunctionGemma 270M, Qwen3.5 0.8B/2B/4B/9B, Llama 3.2 3B, Gemma 3/3n, DeepSeek R1 distills).

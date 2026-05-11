@@ -5,7 +5,7 @@ import 'dart:math' as math;
 import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:llamadart/llamadart.dart';
+import 'package:llamadart/llamadart.dart' hide ModelDownloadProgress;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -700,26 +700,24 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
       return;
     }
 
+    if (kIsWeb && _hasUnsupportedWebAsset(model)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Web builds require remote URLs for model assets.'),
+        ),
+      );
+      return;
+    }
+
     final provider = context.read<ChatProvider>();
-    final pathOrUrl = kIsWeb ? model.url : '${_modelsDir!}/${model.filename}';
+    final pathOrUrl = _resolveModelLoadReference(model);
 
     provider.updateModelPath(pathOrUrl);
     provider.applyModelPreset(model);
 
     if (model.isMultimodal) {
-      if (kIsWeb) {
-        if (model.mmprojUrl != null && model.mmprojUrl!.isNotEmpty) {
-          provider.updateMmprojPath(model.mmprojUrl!);
-        } else {
-          provider.updateMmprojPath(pathOrUrl);
-        }
-      } else if (model.mmprojFilename != null) {
-        provider.updateMmprojPath('${_modelsDir!}/${model.mmprojFilename}');
-      } else if (model.supportsVision || model.supportsAudio) {
-        provider.updateMmprojPath(pathOrUrl);
-      } else {
-        provider.updateMmprojPath('');
-      }
+      final mmprojPath = _resolveMmprojPathForModel(model);
+      provider.updateMmprojPath(mmprojPath ?? '');
     } else {
       provider.updateMmprojPath('');
     }
@@ -911,11 +909,41 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
     }
 
     for (final model in _models) {
-      if (path == model.url || path.contains(model.filename)) {
+      if (path == model.url ||
+          ((kIsWeb || _modelsDir != null) &&
+              path == _resolveModelLoadReference(model))) {
+        return model;
+      }
+      if (path.contains(model.filename)) {
         return model;
       }
     }
     return null;
+  }
+
+  String _resolveModelLoadReference(DownloadableModel model) {
+    return _resolveAssetLoadReference(model.modelSource);
+  }
+
+  bool _hasUnsupportedWebAsset(DownloadableModel model) {
+    if (model.modelSource is LocalModelAssetSource) {
+      return true;
+    }
+    return model.multimodalProjectorSource is LocalModelAssetSource;
+  }
+
+  String _resolveAssetLoadReference(ModelAssetSource source) {
+    if (source is LocalModelAssetSource) {
+      return source.path;
+    }
+    final remote = source as RemoteModelAssetSource;
+    if (kIsWeb) {
+      return remote.url;
+    }
+    if (_modelsDir == null) {
+      throw StateError('Models directory is not initialized.');
+    }
+    return '${_modelsDir!}/${remote.filename}';
   }
 
   String? _resolveMmprojPathForModel(DownloadableModel model) {
@@ -923,23 +951,13 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
       return null;
     }
 
-    if (kIsWeb) {
-      if (model.mmprojUrl != null && model.mmprojUrl!.isNotEmpty) {
-        return model.mmprojUrl!;
-      }
-      return (model.supportsVision || model.supportsAudio) ? model.url : null;
+    final source = model.multimodalProjectorSource;
+    if (source != null) {
+      return _resolveAssetLoadReference(source);
     }
 
-    if (_modelsDir == null) {
-      return null;
-    }
-
-    if (model.mmprojFilename != null && model.mmprojFilename!.isNotEmpty) {
-      return '${_modelsDir!}/${model.mmprojFilename}';
-    }
-
-    return (model.supportsVision || model.supportsAudio)
-        ? '${_modelsDir!}/${model.filename}'
+    return model.supportsVision || model.supportsAudio
+        ? _resolveModelLoadReference(model)
         : null;
   }
 
@@ -1203,11 +1221,7 @@ class _ManageModelsScreenState extends State<ManageModelsScreen>
                       )
                     else
                       ..._models.map((model) {
-                        final selectedPath = kIsWeb
-                            ? model.url
-                            : (_modelsDir != null
-                                  ? '${_modelsDir!}/${model.filename}'
-                                  : '');
+                        final selectedPath = _resolveModelLoadReference(model);
                         final isActivating = _activatingModel == model.filename;
                         final downloadStateListenable = _downloadUiStateFor(
                           model.filename,
