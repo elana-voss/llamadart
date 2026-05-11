@@ -532,14 +532,10 @@ void main() {
           fileName: 'resolved.gguf',
         );
         final resolvedUrl = Uri.parse('https://cdn.example.com/resolved.gguf');
-        final resolvedSource = ModelSource.url(
-          resolvedUrl,
-          fileName: source.fileName,
-        );
         final entry = ModelCacheEntry(
-          sourceCanonicalKey: resolvedSource.metadataSourceKey,
-          cacheKey: resolvedSource.cacheKey,
-          fileName: resolvedSource.fileName,
+          sourceCanonicalKey: source.metadataSourceKey,
+          cacheKey: source.cacheKey,
+          fileName: source.fileName,
           filePath: '/cache/resolved.gguf',
           createdAt: DateTime.utc(2026),
           updatedAt: DateTime.utc(2026),
@@ -558,6 +554,11 @@ void main() {
         expect(resolver.lastSource, source);
         expect(downloadManager.lastSource?.resolvedUri, resolvedUrl);
         expect(downloadManager.lastSource?.fileName, 'resolved.gguf');
+        expect(downloadManager.lastSource?.cacheKey, source.cacheKey);
+        expect(
+          downloadManager.lastSource?.cacheDirectoryName,
+          source.cacheDirectoryName,
+        );
         expect(nativeBackend.lastModelPath, '/cache/resolved.gguf');
       },
     );

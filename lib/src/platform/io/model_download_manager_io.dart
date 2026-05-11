@@ -306,8 +306,7 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
       return null;
     }
     final entry = await _readMetadata(metadataFile);
-    if (entry.sourceCanonicalKey != source.metadataSourceKey ||
-        entry.cacheKey != source.cacheKey ||
+    if (entry.cacheKey != source.cacheKey ||
         entry.fileName != source.fileName ||
         entry.filePath != finalFile.path) {
       return null;

@@ -232,5 +232,24 @@ void main() {
       expect(source.cacheKey, isNot(differentRevision.cacheKey));
       expect(source.cacheKey, isNot(differentPath.cacheKey));
     });
+
+    test('resolved URI preserves canonical cache identity', () {
+      final source = ModelSource.huggingFace(
+        repoId: 'owner/repo',
+        filePath: 'sub/model.gguf',
+      );
+      final resolved = source.withResolvedUri(
+        Uri.parse('https://cdn.example.com/model.gguf?token=secret'),
+      );
+
+      expect(
+        resolved.resolvedUri,
+        Uri.parse('https://cdn.example.com/model.gguf?token=secret'),
+      );
+      expect(resolved.fileName, source.fileName);
+      expect(resolved.canonicalKey, source.canonicalKey);
+      expect(resolved.cacheKey, source.cacheKey);
+      expect(resolved.cacheDirectoryName, source.cacheDirectoryName);
+    });
   });
 }

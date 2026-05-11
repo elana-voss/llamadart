@@ -195,6 +195,46 @@ class ModelSource {
 
   @override
   String toString() => metadataSourceKey;
+
+  /// Returns a copy that downloads/loads from [resolvedUri] while preserving
+  /// this source's canonical cache identity.
+  ///
+  /// This is intended for resolvers that translate a stable user-facing source
+  /// such as `hf://owner/repo/model.gguf` to a concrete HTTP(S) URL. Cache
+  /// operations should still use the original [canonicalKey], [cacheKey], and
+  /// [cacheDirectoryName] so entries remain discoverable by the caller's source.
+  ModelSource withResolvedUri(Uri resolvedUri) {
+    if (isLocal) {
+      throw StateError('Local model sources cannot be resolved to a URL.');
+    }
+    _validateRemoteUri(resolvedUri, 'resolvedUri');
+    return ModelSource._(
+      kind: kind,
+      url: resolvedUri,
+      repoId: repoId,
+      revision: revision,
+      filePath: filePath,
+      fileName: fileName,
+      canonicalKey: canonicalKey,
+    );
+  }
+}
+
+void _validateRemoteUri(Uri url, String name) {
+  if (url.scheme != 'http' && url.scheme != 'https') {
+    throw ArgumentError.value(
+      url,
+      name,
+      'Only http and https URLs are supported.',
+    );
+  }
+  if (!url.hasAuthority || url.host.isEmpty) {
+    throw ArgumentError.value(
+      url,
+      name,
+      'HTTP(S) model URLs must include a host.',
+    );
+  }
 }
 
 ModelSource _parseHuggingFaceUri(String value) {
