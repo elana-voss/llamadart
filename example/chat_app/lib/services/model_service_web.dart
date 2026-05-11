@@ -33,10 +33,32 @@ class ModelServiceWeb implements ModelService {
     final prefs = await SharedPreferences.getInstance();
     final downloaded = prefs.getStringList(_downloadedModelsKey) ?? const [];
     final downloadedSet = downloaded.toSet();
-    return models
-        .where((model) => _isProfileCached(model, downloadedSet))
-        .map((model) => model.filename)
-        .toSet();
+    final cachedModels = <String>{};
+    var migratedLegacyMarkers = false;
+
+    for (final model in models) {
+      if (_isProfileCached(model, downloadedSet)) {
+        cachedModels.add(model.filename);
+        continue;
+      }
+
+      final sources = _remoteSourcesFor(model);
+      if (downloadedSet.contains(model.filename) &&
+          sources.length == _assetSourcesFor(model).length) {
+        downloadedSet.remove(model.filename);
+        for (final source in sources) {
+          downloadedSet.add(source.cacheKey);
+        }
+        cachedModels.add(model.filename);
+        migratedLegacyMarkers = true;
+      }
+    }
+
+    if (migratedLegacyMarkers) {
+      await prefs.setStringList(_downloadedModelsKey, downloadedSet.toList());
+    }
+
+    return cachedModels;
   }
 
   bool _isProfileCached(DownloadableModel model, Set<String> downloaded) {

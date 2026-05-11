@@ -190,9 +190,17 @@ Future<void> main(List<String> args) async {
     if (filter != null && !model.name.toLowerCase().contains(filter)) {
       continue;
     }
+    final source = ModelSource.url(
+      Uri.parse(model.downloadUrl),
+      fileName: model.fileName,
+    );
+    final manager = DefaultModelDownloadManager(
+      defaultCacheDirectory: modelsDir.path,
+    );
+    final cachedEntry = await manager.get(source.cacheKey);
     final legacyFilePath = path.join(modelsDir.path, model.fileName);
-    var filePath = legacyFilePath;
-    final file = File(legacyFilePath);
+    var filePath = cachedEntry?.filePath ?? legacyFilePath;
+    final file = File(filePath);
 
     print('\n================================================================');
     print('TESTING MODEL: ${model.name}');
@@ -214,7 +222,11 @@ Future<void> main(List<String> args) async {
         continue;
       }
     } else {
-      print('Model found locally.');
+      print(
+        cachedEntry == null
+            ? 'Model found at legacy path.'
+            : 'Model found in package cache.',
+      );
     }
     print('FILE: $filePath');
 
