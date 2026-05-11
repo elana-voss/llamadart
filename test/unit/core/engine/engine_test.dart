@@ -379,8 +379,38 @@ void main() {
               webEngine.loadModelSource(ModelSource.path('/models/model.gguf')),
           throwsA(isA<LlamaUnsupportedException>()),
         );
-        expect(webBackend.modelLoadCalls, 0);
-        expect(webBackend.modelLoadFromUrlCalls, 0);
+      },
+    );
+
+    test(
+      'native loadModelSource applies load options for local path sources',
+      () async {
+        final source = ModelSource.path('/models/model.gguf');
+        final entry = ModelCacheEntry(
+          sourceCanonicalKey: source.metadataSourceKey,
+          cacheKey: source.cacheKey,
+          fileName: source.fileName,
+          filePath: '/models/model.gguf',
+          createdAt: DateTime.utc(2026),
+          updatedAt: DateTime.utc(2026),
+        );
+        final downloadManager = MockModelDownloadManager(entry);
+        final nativeBackend = MockLlamaBackend();
+        final nativeEngine = LlamaEngine(
+          nativeBackend,
+          modelDownloadManager: downloadManager,
+        );
+        final options = ModelLoadOptions(
+          sha256:
+              '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        );
+
+        await nativeEngine.loadModelSource(source, options: options);
+
+        expect(downloadManager.ensureModelCalls, 1);
+        expect(downloadManager.lastSource, source);
+        expect(downloadManager.lastOptions, same(options));
+        expect(nativeBackend.lastModelPath, '/models/model.gguf');
       },
     );
 
@@ -529,6 +559,23 @@ void main() {
         expect(downloadManager.lastSource?.resolvedUri, resolvedUrl);
         expect(downloadManager.lastSource?.fileName, 'resolved.gguf');
         expect(nativeBackend.lastModelPath, '/cache/resolved.gguf');
+      },
+    );
+
+    test(
+      'loadModelSource rejects unsupported cancellation on URL backends',
+      () async {
+        final webBackend = MockLlamaBackend(urlLoadingSupported: true);
+        final webEngine = LlamaEngine(webBackend);
+
+        await expectLater(
+          () => webEngine.loadModelSource(
+            ModelSource.url(Uri.parse('https://example.com/model.gguf')),
+            options: ModelLoadOptions(cancelToken: ModelDownloadCancelToken()),
+          ),
+          throwsA(isA<LlamaUnsupportedException>()),
+        );
+        expect(webBackend.modelLoadFromUrlCalls, 0);
       },
     );
 

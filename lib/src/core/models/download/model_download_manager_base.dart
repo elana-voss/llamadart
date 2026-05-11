@@ -340,7 +340,7 @@ String _validatedCacheFileName(String fileName) {
       'Cache fileName must be a safe basename.',
     );
   }
-  return fileName;
+  return decoded;
 }
 
 String _decodeCacheComponent(String value, String name) {
@@ -380,5 +380,5 @@ String _validatedCacheFilePath(String filePath) {
       );
     }
   }
-  return filePath;
+  return decodedPath;
 }

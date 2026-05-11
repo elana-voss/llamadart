@@ -74,7 +74,7 @@ class RemoteModelAssetSource extends ModelAssetSource {
   String get displayName => filename;
 
   @override
-  String get canonicalKey => 'remote:$url#$filename';
+  String get canonicalKey => 'remote:${jsonEncode([url, filename])}';
 
   @override
   String get cacheKey => _assetCacheKey(canonicalKey);

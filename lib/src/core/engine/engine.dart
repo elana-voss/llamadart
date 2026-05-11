@@ -203,6 +203,14 @@ class LlamaEngine {
             'Explicit local model paths are not supported by URL-loading backends.',
           );
         }
+        if (source.isLocal) {
+          final entry = await modelDownloadManager.ensureModel(
+            source,
+            options: options,
+            onProgress: onProgress,
+          );
+          return loadModel(entry.filePath, modelParams: modelParams);
+        }
         return loadModel(path, modelParams: modelParams);
       case RemoteModelUrl(:final url, :final useBrowserCache):
         if (!useBrowserCache) {
@@ -1240,6 +1248,11 @@ class LlamaEngine {
     if (options.bearerToken != null || options.headers.isNotEmpty) {
       throw LlamaUnsupportedException(
         'Authenticated model URL loading requires the native download/cache manager.',
+      );
+    }
+    if (options.cancelToken != null) {
+      throw LlamaUnsupportedException(
+        'Cancellation tokens require the native download/cache manager.',
       );
     }
     if (options.sha256 != null) {

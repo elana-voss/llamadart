@@ -47,6 +47,23 @@ void main() {
       expect(first.cacheKey, isNot(contains('model.gguf')));
     });
 
+    test(
+      'remote canonical keys are unambiguous when values contain delimiters',
+      () {
+        const first = RemoteModelAssetSource(
+          url: 'https://example.com/model.gguf',
+          filename: 'projector#v1.gguf',
+        );
+        const second = RemoteModelAssetSource(
+          url: 'https://example.com/model.gguf#projector',
+          filename: 'v1.gguf',
+        );
+
+        expect(first.canonicalKey, isNot(second.canonicalKey));
+        expect(first.cacheKey, isNot(second.cacheKey));
+      },
+    );
+
     test('legacy constructor maps model and projector to remote sources', () {
       final profile = DownloadableModel(
         name: 'Remote VLM',

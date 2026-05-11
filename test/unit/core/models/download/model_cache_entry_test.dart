@@ -142,6 +142,20 @@ void main() {
       );
     });
 
+    test('normalizes percent-encoded cache file names and paths', () {
+      final entry = ModelCacheEntry(
+        sourceCanonicalKey: 'path:/models/model.gguf',
+        cacheKey: 'abc123',
+        fileName: 'model%2Egguf',
+        filePath: r'C:\cache\model%2Egguf',
+        createdAt: DateTime.utc(2026, 1, 2),
+        updatedAt: DateTime.utc(2026, 1, 2),
+      );
+
+      expect(entry.fileName, 'model.gguf');
+      expect(entry.filePath, 'C:/cache/model.gguf');
+    });
+
     test('rejects unsafe cache file names and traversal paths', () {
       for (final fileName in <String>[
         '',
