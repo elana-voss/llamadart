@@ -345,40 +345,169 @@ class DefaultModelDownloadManager implements ModelDownloadManager {
     File finalFile,
     ModelLoadOptions options,
   ) async {
-    if (!await metadataFile.exists() || !await finalFile.exists()) {
-      return null;
+    try {
+      if (!await finalFile.exists()) {
+        return null;
+      }
+      if (!await metadataFile.exists()) {
+        return _recoverMetadataEntry(source, metadataFile, finalFile, options);
+      }
+    } on FileSystemException {
+      return _recoverMetadataEntry(source, metadataFile, finalFile, options);
+    } on IOException {
+      return _recoverMetadataEntry(source, metadataFile, finalFile, options);
     }
-    final entry = await _readMetadata(metadataFile);
+
+    final ModelCacheEntry entry;
+    try {
+      entry = await _readMetadata(metadataFile);
+    } on FormatException {
+      return _recoverMetadataEntry(source, metadataFile, finalFile, options);
+    } on ArgumentError {
+      return _recoverMetadataEntry(source, metadataFile, finalFile, options);
+    } on FileSystemException {
+      return _recoverMetadataEntry(source, metadataFile, finalFile, options);
+    } on IOException {
+      return _recoverMetadataEntry(source, metadataFile, finalFile, options);
+    }
+
     if (entry.cacheKey != source.cacheKey ||
         entry.fileName != source.fileName ||
         entry.filePath != finalFile.path) {
       return null;
     }
-    String? verifiedSha256;
-    if (options.sha256 != null) {
-      final actual = await _sha256File(finalFile);
-      if (actual != options.sha256) {
-        await _deleteIfExists(finalFile);
-        await _deleteIfExists(metadataFile);
+    final verification = await _verifyCompletedFile(
+      finalFile,
+      metadataFile,
+      entry,
+      options,
+    );
+    if (!verification.isValid) {
+      return null;
+    }
+    try {
+      final refreshed = ModelCacheEntry(
+        sourceCanonicalKey: entry.sourceCanonicalKey,
+        cacheKey: entry.cacheKey,
+        fileName: entry.fileName,
+        filePath: entry.filePath,
+        bytes: verification.bytes!,
+        sha256: verification.sha256 ?? entry.sha256,
+        etag: entry.etag,
+        lastModified: entry.lastModified,
+        createdAt: entry.createdAt,
+        updatedAt: DateTime.now().toUtc(),
+        expiresAt: entry.expiresAt,
+      );
+      await _writeMetadata(metadataFile, refreshed);
+      return refreshed;
+    } on FileSystemException {
+      await _deleteIfExists(metadataFile);
+      return null;
+    } on IOException {
+      await _deleteIfExists(metadataFile);
+      return null;
+    }
+  }
+
+  Future<ModelCacheEntry?> _recoverMetadataEntry(
+    ModelSource source,
+    File metadataFile,
+    File finalFile,
+    ModelLoadOptions options,
+  ) async {
+    try {
+      final verifiedSha256 = await _verifyRecoveredFile(
+        finalFile,
+        metadataFile,
+        options,
+      );
+      if (options.sha256 != null && verifiedSha256 == null) {
         return null;
       }
-      verifiedSha256 = actual;
+      final now = DateTime.now().toUtc();
+      final recovered = await _entryForFile(
+        source,
+        finalFile,
+        now,
+        sha256Digest: verifiedSha256,
+      );
+      await _writeMetadata(metadataFile, recovered);
+      return recovered;
+    } on FileSystemException {
+      await _deleteIfExists(metadataFile);
+      return null;
+    } on IOException {
+      await _deleteIfExists(metadataFile);
+      return null;
     }
-    final refreshed = ModelCacheEntry(
-      sourceCanonicalKey: entry.sourceCanonicalKey,
-      cacheKey: entry.cacheKey,
-      fileName: entry.fileName,
-      filePath: entry.filePath,
-      bytes: entry.bytes,
-      sha256: verifiedSha256 ?? entry.sha256,
-      etag: entry.etag,
-      lastModified: entry.lastModified,
-      createdAt: entry.createdAt,
-      updatedAt: DateTime.now().toUtc(),
-      expiresAt: entry.expiresAt,
-    );
-    await _writeMetadata(metadataFile, refreshed);
-    return refreshed;
+  }
+
+  Future<({bool isValid, int? bytes, String? sha256})> _verifyCompletedFile(
+    File finalFile,
+    File metadataFile,
+    ModelCacheEntry entry,
+    ModelLoadOptions options,
+  ) async {
+    try {
+      final actualBytes = await finalFile.length();
+      final recordedBytes = entry.bytes;
+      if (recordedBytes != null && actualBytes != recordedBytes) {
+        await _deleteStaleCompletedEntry(finalFile, metadataFile);
+        return (isValid: false, bytes: null, sha256: null);
+      }
+      final storedSha256 = entry.sha256;
+      final expectedSha256 = options.sha256;
+      if (storedSha256 == null && expectedSha256 == null) {
+        return (isValid: true, bytes: actualBytes, sha256: null);
+      }
+      final actual = await _sha256File(finalFile);
+      if ((storedSha256 != null && actual != storedSha256) ||
+          (expectedSha256 != null && actual != expectedSha256)) {
+        await _deleteStaleCompletedEntry(finalFile, metadataFile);
+        return (isValid: false, bytes: null, sha256: null);
+      }
+      return (isValid: true, bytes: actualBytes, sha256: actual);
+    } on FileSystemException {
+      await _deleteIfExists(metadataFile);
+      return (isValid: false, bytes: null, sha256: null);
+    } on IOException {
+      await _deleteIfExists(metadataFile);
+      return (isValid: false, bytes: null, sha256: null);
+    }
+  }
+
+  Future<String?> _verifyRecoveredFile(
+    File finalFile,
+    File metadataFile,
+    ModelLoadOptions options,
+  ) async {
+    try {
+      final expectedSha256 = options.sha256;
+      if (expectedSha256 == null) {
+        return null;
+      }
+      final actual = await _sha256File(finalFile);
+      if (actual != expectedSha256) {
+        await _deleteStaleCompletedEntry(finalFile, metadataFile);
+        return null;
+      }
+      return actual;
+    } on FileSystemException {
+      await _deleteIfExists(metadataFile);
+      return null;
+    } on IOException {
+      await _deleteIfExists(metadataFile);
+      return null;
+    }
+  }
+
+  Future<void> _deleteStaleCompletedEntry(
+    File finalFile,
+    File metadataFile,
+  ) async {
+    await _deleteIfExists(finalFile);
+    await _deleteIfExists(metadataFile);
   }
 
   Future<ModelCacheEntry> _download(
