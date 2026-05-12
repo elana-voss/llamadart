@@ -233,6 +233,10 @@ class LlamaCppService {
   final Map<int, String> _modelBackendNames = <int, String>{};
   final Map<int, int> _modelResolvedGpuLayers = <int, int>{};
 
+  /// Refcount of in-flight `generate()` calls per context. A set would let the
+  /// first completion clear the marker while another decode is still running.
+  final Map<int, int> _generatingContexts = <int, int>{};
+
   // Mapping: modelHandle -> mtmdContextHandle
   final Map<int, int> _modelToMtmd = {};
   final Map<int, Pointer<mtmd_context>> _mtmdContexts = {};
@@ -2559,45 +2563,54 @@ class LlamaCppService {
   }) async* {
     var ctx = _contexts[contextHandle];
     if (ctx == null) throw Exception("Invalid context handle");
-
-    final modelHandle = _contextToModel[contextHandle]!;
-    final model = _models[modelHandle]!;
-    final modelParams = _contextParams[contextHandle]!;
-    final vocab = llama_model_get_vocab(model.pointer);
-    final hasMediaParts =
-        parts?.any((p) => p is LlamaImageContent || p is LlamaAudioContent) ??
-        false;
-
-    // 1. Reset Context
-    ctx = _resetContext(
+    _generatingContexts.update(
       contextHandle,
-      ctx,
-      clearMemory: hasMediaParts || !params.reusePromptPrefix,
+      (count) => count + 1,
+      ifAbsent: () => 1,
     );
-    llama_perf_context_reset(ctx.pointer);
-    final existingSampler = _samplers[contextHandle];
-    if (existingSampler != null) {
-      llama_perf_sampler_reset(existingSampler);
-    }
 
-    // 2. Prepare Resources
-    final nCtx = llama_n_ctx(ctx.pointer);
-    final batch = _batches[contextHandle]!;
-    final tokensPtr = malloc<Int32>(nCtx);
-    final pieceBuf = malloc<Uint8>(256);
+    Pointer<Int32> tokensPtr = nullptr;
+    Pointer<Uint8> pieceBuf = nullptr;
     Pointer<Utf8> grammarPtr = nullptr;
     Pointer<Utf8> rootPtr = nullptr;
     _LazyGrammarConfig? lazyGrammarConfig;
-
-    if (params.grammar != null) {
-      grammarPtr = params.grammar!.toNativeUtf8();
-      rootPtr = params.grammarRoot.toNativeUtf8();
-      if (params.grammarLazy && params.grammarTriggers.isNotEmpty) {
-        lazyGrammarConfig = _buildLazyGrammarConfig(params);
-      }
-    }
+    Pointer<llama_sampler> sampler = nullptr;
 
     try {
+      final modelHandle = _contextToModel[contextHandle]!;
+      final model = _models[modelHandle]!;
+      final modelParams = _contextParams[contextHandle]!;
+      final vocab = llama_model_get_vocab(model.pointer);
+      final hasMediaParts =
+          parts?.any((p) => p is LlamaImageContent || p is LlamaAudioContent) ??
+          false;
+
+      // 1. Reset Context
+      ctx = _resetContext(
+        contextHandle,
+        ctx,
+        clearMemory: hasMediaParts || !params.reusePromptPrefix,
+      );
+      llama_perf_context_reset(ctx.pointer);
+      final existingSampler = _samplers[contextHandle];
+      if (existingSampler != null) {
+        llama_perf_sampler_reset(existingSampler);
+      }
+
+      // 2. Prepare Resources
+      final nCtx = llama_n_ctx(ctx.pointer);
+      final batch = _batches[contextHandle]!;
+      tokensPtr = malloc<Int32>(nCtx);
+      pieceBuf = malloc<Uint8>(256);
+
+      if (params.grammar != null) {
+        grammarPtr = params.grammar!.toNativeUtf8();
+        rootPtr = params.grammarRoot.toNativeUtf8();
+        if (params.grammarLazy && params.grammarTriggers.isNotEmpty) {
+          lazyGrammarConfig = _buildLazyGrammarConfig(params);
+        }
+      }
+
       // 3. Ingest Prompt (Text or Multimodal)
       final promptEvalStopwatch = Stopwatch()..start();
       final initialTokens = _ingestPrompt(
@@ -2621,7 +2634,7 @@ class LlamaCppService {
       _ensureLogitsAvailableAfterPromptEval(ctx.pointer);
 
       // 4. Initialize and Run Sampler Loop
-      final sampler = _initializeSampler(
+      sampler = _initializeSampler(
         params,
         vocab,
         grammarPtr,
@@ -2654,11 +2667,16 @@ class LlamaCppService {
         preservedTokenIds,
         effectiveStopSequences,
       );
-
-      llama_sampler_free(sampler);
     } finally {
-      malloc.free(tokensPtr);
-      malloc.free(pieceBuf);
+      if (sampler != nullptr) llama_sampler_free(sampler);
+      final remaining = (_generatingContexts[contextHandle] ?? 1) - 1;
+      if (remaining <= 0) {
+        _generatingContexts.remove(contextHandle);
+      } else {
+        _generatingContexts[contextHandle] = remaining;
+      }
+      if (tokensPtr != nullptr) malloc.free(tokensPtr);
+      if (pieceBuf != nullptr) malloc.free(pieceBuf);
       if (grammarPtr != nullptr) malloc.free(grammarPtr);
       if (rootPtr != nullptr) malloc.free(rootPtr);
       lazyGrammarConfig?.dispose();
@@ -3364,7 +3382,16 @@ class LlamaCppService {
 
     final reusedPrefix = _sharedPrefixLength(cachedTokens, tokensPtr, nTokens);
 
-    if (reusedPrefix <= 0 || reusedPrefix >= nTokens) {
+    // Loaded KV holds no live logits; re-decode only the final token. Gated
+    // on kvFromStateLoad so the in-process reuse path stays bit-exact against
+    // a cleared baseline (parity property).
+    final exactStateLoadMatch =
+        ctx.kvFromStateLoad &&
+        reusedPrefix == nTokens &&
+        cachedTokens.length == nTokens;
+
+    if (reusedPrefix <= 0 ||
+        (reusedPrefix >= nTokens && !exactStateLoadMatch)) {
       final canReuseCachedCopy =
           reusedPrefix == nTokens && cachedTokens.length == nTokens;
       return _decodeAndCacheFullPrompt(
@@ -3388,7 +3415,7 @@ class LlamaCppService {
       );
     }
 
-    final decodeStart = reusedPrefix;
+    final decodeStart = exactStateLoadMatch ? nTokens - 1 : reusedPrefix;
 
     final maxSeqPos = llama_memory_seq_pos_max(memory, 0);
     final removeTo = maxSeqPos >= decodeStart ? maxSeqPos + 1 : decodeStart;
@@ -3413,7 +3440,10 @@ class LlamaCppService {
       maxBatchTokens: maxBatchTokens,
     );
 
-    ctx.cachedPromptTokens = _copyPromptTokens(tokensPtr, nTokens);
+    ctx.cachedPromptTokens = exactStateLoadMatch
+        ? cachedTokens
+        : _copyPromptTokens(tokensPtr, nTokens);
+    ctx.kvFromStateLoad = false;
 
     return nTokens;
   }
@@ -3437,6 +3467,7 @@ class LlamaCppService {
     );
     ctx.cachedPromptTokens =
         existingCachedTokens ?? _copyPromptTokens(tokensPtr, nTokens);
+    ctx.kvFromStateLoad = false;
     return nTokens;
   }
 
@@ -3848,6 +3879,107 @@ class LlamaCppService {
     }
     malloc.free(buffer);
     return utf8.decode(bytes, allowMalformed: true);
+  }
+
+  /// Persists the KV-cache state of [contextHandle] to [path] together
+  /// with the producing token sequence so a later [stateLoadFile] can
+  /// resume inference without paying the prompt-eval cost again.
+  ///
+  /// Wraps `llama_state_save_file`. Returns true on success.
+  bool stateSaveFile(int contextHandle, String path, List<int> tokens) {
+    final ctx = _contexts[contextHandle];
+    if (ctx == null) {
+      throw StateError('Unknown context handle: $contextHandle');
+    }
+    if (_generatingContexts.containsKey(contextHandle)) {
+      throw StateError(
+        'Cannot save state while generation is active on context $contextHandle',
+      );
+    }
+    llama_synchronize(ctx.pointer);
+    final pathPtr = path.toNativeUtf8();
+    final tokensPtr = tokens.isEmpty ? nullptr : malloc<Int32>(tokens.length);
+    try {
+      for (int i = 0; i < tokens.length; i++) {
+        tokensPtr[i] = tokens[i];
+      }
+      return llama_state_save_file(
+        ctx.pointer,
+        pathPtr.cast(),
+        tokensPtr,
+        tokens.length,
+      );
+    } finally {
+      malloc.free(pathPtr);
+      if (tokensPtr != nullptr) malloc.free(tokensPtr);
+    }
+  }
+
+  /// Restores a previously saved KV-cache state into [contextHandle].
+  /// [tokenCapacity] caps the number of tokens read back.
+  ///
+  /// Wraps `llama_state_load_file`. Throws on failure (corrupt file,
+  /// schema mismatch, etc.).
+  List<int> stateLoadFile(int contextHandle, String path, int tokenCapacity) {
+    final ctx = _contexts[contextHandle];
+    if (ctx == null) {
+      throw StateError('Unknown context handle: $contextHandle');
+    }
+    if (_generatingContexts.containsKey(contextHandle)) {
+      throw StateError(
+        'Cannot load state while generation is active on context $contextHandle',
+      );
+    }
+    if (tokenCapacity <= 0) {
+      throw ArgumentError.value(
+        tokenCapacity,
+        'tokenCapacity',
+        'must be positive',
+      );
+    }
+    final contextCapacity = llama_n_ctx(ctx.pointer);
+    if (tokenCapacity > contextCapacity) {
+      throw ArgumentError.value(
+        tokenCapacity,
+        'tokenCapacity',
+        'must not exceed context size ($contextCapacity)',
+      );
+    }
+    llama_synchronize(ctx.pointer);
+    final pathPtr = path.toNativeUtf8();
+    final tokensPtr = malloc<Int32>(tokenCapacity);
+    final countPtr = malloc<Size>();
+    try {
+      countPtr.value = 0;
+      final ok = llama_state_load_file(
+        ctx.pointer,
+        pathPtr.cast(),
+        tokensPtr,
+        tokenCapacity,
+        countPtr,
+      );
+      if (!ok) {
+        throw StateError(
+          'llama_state_load_file failed for "$path" '
+          '(corrupt file, version mismatch, or capacity too small)',
+        );
+      }
+      final actual = countPtr.value;
+      if (actual > tokenCapacity) {
+        throw StateError(
+          'llama_state_load_file returned actual=$actual '
+          'exceeding capacity=$tokenCapacity',
+        );
+      }
+      final loaded = List<int>.generate(actual, (i) => tokensPtr[i]);
+      ctx.cachedPromptTokens = loaded;
+      ctx.kvFromStateLoad = true;
+      return loaded;
+    } finally {
+      malloc.free(pathPtr);
+      malloc.free(tokensPtr);
+      malloc.free(countPtr);
+    }
   }
 
   /// Returns metadata for the specified [modelHandle].
@@ -4766,6 +4898,12 @@ class _LlamaContextWrapper {
   final Pointer<llama_context> pointer;
   final _LlamaModelWrapper? _modelKeepAlive;
   List<int>? cachedPromptTokens;
+
+  /// Set by stateLoadFile, cleared by any decode. Gates the exact-prompt
+  /// single-token resume path; without the gate, the in-process reuse path
+  /// would diverge from the cleared+full-decode baseline (parity property).
+  bool kvFromStateLoad = false;
+
   double lastPerfPromptEvalMs = 0;
   double lastPerfEvalMs = 0;
   double lastPerfSampleMs = 0;
@@ -4777,6 +4915,7 @@ class _LlamaContextWrapper {
     // ignore: unused_local_variable
     final _ = _modelKeepAlive;
     cachedPromptTokens = null;
+    kvFromStateLoad = false;
     llama_free(pointer);
   }
 }

@@ -22,6 +22,8 @@ chat history management.
 - **Template-aware**: Uses model chat templates and parsing behavior automatically.
 - **Tool support**: Works with structured tool-call outputs.
 - **Embedding APIs**: `embed(...)` and `embedBatch(...)` on the same engine.
+- **State persistence**: Native backends can save/restore KV-cache state with
+  `stateSaveFile(...)` / `stateLoadFile(...)` for raw-prompt resume workflows.
 
 ```dart
 import 'package:llamadart/llamadart.dart';
@@ -61,6 +63,8 @@ streams.
 **Advantages:**
 - **Granular control**: Manage handles and pipeline steps directly.
 - **Integration flexibility**: Useful for specialized runtime integrations.
+- **Optional capabilities**: Backends can expose extra interfaces such as
+  `BackendStatePersistence` when a runtime supports native KV-cache snapshots.
 
 ```dart
 import 'dart:convert';

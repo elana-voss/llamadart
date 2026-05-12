@@ -207,6 +207,22 @@ void llamaWorkerEntry(SendPort initialSendPort) {
             message.sendPort.send(
               ErrorResponse("Chat template not implemented in service yet"),
             );
+
+          case StateSaveFileRequest():
+            final ok = service.stateSaveFile(
+              message.contextHandle,
+              message.path,
+              message.tokens,
+            );
+            message.sendPort.send(StateSaveFileResponse(ok));
+
+          case StateLoadFileRequest():
+            final tokens = service.stateLoadFile(
+              message.contextHandle,
+              message.path,
+              message.tokenCapacity,
+            );
+            message.sendPort.send(StateLoadFileResponse(tokens));
         }
       } catch (e) {
         message.sendPort.send(ErrorResponse(e.toString()));

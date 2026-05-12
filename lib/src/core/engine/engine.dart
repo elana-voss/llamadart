@@ -1060,6 +1060,61 @@ class LlamaEngine {
   }
 
   // ============================================================
+  // STATE PERSISTENCE
+  // ============================================================
+
+  /// Whether the active backend can save and restore KV-cache state to
+  /// disk via [stateSaveFile] / [stateLoadFile]. Native backends do; the
+  /// WebGPU backend does not.
+  bool get supportsStatePersistence => backend is BackendStatePersistence;
+
+  /// Persists the KV-cache state of the loaded model to [path] together
+  /// with [tokens] — the token sequence the current state was produced
+  /// from. A later [stateLoadFile] call rebuilds the same in-memory
+  /// state without re-evaluating the prompt, which is the difference
+  /// between a 30-second resume on phone CPUs and an instant one.
+  ///
+  /// File format is whatever llama.cpp emits — opaque, not portable
+  /// across builds, and tied to the same model used at save time.
+  ///
+  /// Returns true on success.
+  Future<bool> stateSaveFile(String path, {required List<int> tokens}) {
+    _ensureReady();
+    final persistence = _resolveStatePersistence();
+    return persistence.stateSaveFile(_contextHandle!, path, tokens);
+  }
+
+  /// Restores a previously saved state from [path]. [tokenCapacity]
+  /// caps how many tokens to read back; passing the loaded model's
+  /// `n_ctx` is a safe default.
+  ///
+  /// Returns the token sequence the saved state was originally produced
+  /// from. This API restores the native KV cache only — callers that use
+  /// [ChatSession] must persist and reconstruct the chat message history
+  /// separately (e.g. on disk), since [ChatSession.addMessage] takes
+  /// [LlamaChatMessage] objects, not raw token ids. The returned token
+  /// list is exposed mainly for diagnostics and for callers driving the
+  /// engine at the raw prompt level.
+  Future<StateLoadResult> stateLoadFile(
+    String path, {
+    required int tokenCapacity,
+  }) {
+    _ensureReady();
+    final persistence = _resolveStatePersistence();
+    return persistence.stateLoadFile(_contextHandle!, path, tokenCapacity);
+  }
+
+  BackendStatePersistence _resolveStatePersistence() {
+    final candidate = backend;
+    if (candidate is BackendStatePersistence) {
+      return candidate as BackendStatePersistence;
+    }
+    throw LlamaUnsupportedException(
+      'State persistence is not supported by the active backend.',
+    );
+  }
+
+  // ============================================================
   // MODEL INTROSPECTION
   // ============================================================
 

@@ -204,3 +204,47 @@ abstract class BackendBatchEmbeddings extends BackendEmbeddings {
     bool normalize = true,
   });
 }
+
+/// Result of [BackendStatePersistence.stateLoadFile]. Contains the token
+/// sequence saved alongside the native KV-cache state.
+///
+/// Loading restores the native KV cache only. Callers using higher-level
+/// chat abstractions must persist and reconstruct their chat message
+/// history separately; these raw token IDs are exposed mainly for
+/// diagnostics and raw-prompt callers.
+class StateLoadResult {
+  /// The token IDs that the saved state was produced from.
+  final List<int> tokens;
+
+  /// Creates a new [StateLoadResult].
+  const StateLoadResult({required this.tokens});
+}
+
+/// Optional backend capability for persisting the KV cache to disk and
+/// restoring it later, mirroring `llama_state_save_file` /
+/// `llama_state_load_file` in llama.cpp. Saving captures the native
+/// runtime state of [contextHandle] together with the token sequence
+/// that produced it. Loading restores the native KV cache and returns
+/// the saved token sequence; subsequent inference can skip prompt
+/// evaluation when callers re-issue a prompt with the restored token
+/// prefix and prompt-prefix reuse enabled.
+abstract class BackendStatePersistence {
+  /// Writes the KV cache state of [contextHandle] together with the
+  /// token sequence in [tokens] to [path]. The file format is the one
+  /// llama.cpp emits — opaque, version-tied, and not portable across
+  /// llama.cpp builds.
+  ///
+  /// Returns true on success.
+  Future<bool> stateSaveFile(int contextHandle, String path, List<int> tokens);
+
+  /// Restores the KV cache of [contextHandle] from a file previously
+  /// written by [stateSaveFile]. [tokenCapacity] caps how many tokens
+  /// the caller is willing to receive — typically the context size of
+  /// the loaded model. Throws if the file is corrupt or was produced
+  /// by a different llama.cpp build.
+  Future<StateLoadResult> stateLoadFile(
+    int contextHandle,
+    String path,
+    int tokenCapacity,
+  );
+}
