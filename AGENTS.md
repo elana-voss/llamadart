@@ -122,9 +122,40 @@ pass `--mem64` and a smaller `--context-size` to keep the smoke bounded.
 - Modular separation: `engine/`, `backends/`, `models/`, `utils/`
 - Abstract interfaces in `backends/backend.dart`
 
+### Capability & Runtime Semantics
+- Prefer explicit capability probes over structural/interface checks when behavior
+  depends on runtime assets, platform support, browser APIs, or native feature
+  availability. For example, user-facing state persistence checks should use
+  `LlamaEngine.supportsStatePersistence` rather than assuming that a backend
+  implementing `BackendStatePersistence` is currently usable.
+- Unsupported paths must fail loudly with actionable diagnostics. Include the
+  missing capability, platform/runtime condition, and version requirement where
+  known (for example, a named WebGPU bridge API plus the minimum bridge asset
+  version or runtime flag required for that feature).
+- Do not silently report success for unsupported platform/option combinations.
+  Public engine/API paths should either gate behavior with an explicit support
+  flag or throw a typed `LlamaUnsupportedException` before mutating state.
+
+### Web / WebGPU Bridge Expectations
+- WebGPU bridge features are versioned runtime capabilities. When changing bridge
+  behavior, verify the pinned asset tag/manifest, direct bridge calls, worker
+  path, Dart interop wrapper, public engine API, docs, and examples together.
+- Document browser durability precisely. Web bridge filesystem paths may be
+  virtual or in-memory unless the active bridge documents durable backing
+  storage; durable browser storage can require app-level export/import outside
+  Dart file helpers.
+- Add regression coverage for both happy and negative paths: missing bridge API,
+  old bridge assets, `supports* == false`, correctly awaited sync/async errors,
+  and alternate JS interop return shapes.
+- Keep README, website docs/support matrix, examples, and changelog aligned with
+  any public capability or platform-support change.
+
 ### Testing Standards
 - New public APIs require unit or integration tests
 - Test both Native (VM) and Web implementations for refactored shared logic
+- Capability-dependent behavior needs tests for unsupported and version-skew
+  paths, not just the happy path. Assert error messages when they are intended
+  to guide users toward a specific bridge/runtime version or configuration.
 - Mark generated files with `// coverage:ignore-file` so coverage gates exclude them
 - Use `expect` matchers over `assert`
 - Close ports/streams in `setUp`/`tearDown` to avoid hanging
