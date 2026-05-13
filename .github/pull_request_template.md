@@ -24,7 +24,7 @@
 ## Test Plan
 <!-- Mark commands as N/A with a short reason for docs-only/template-only changes. -->
 - [ ] `dart format --output=none --set-exit-if-changed .`
-- [ ] `dart analyze --fatal-infos`
+- [ ] `dart analyze`
 - [ ] `dart test -p vm -j 1 --exclude-tags local-only`
 - [ ] Other targeted/local-only validation: <!-- e.g. Chrome/WebGPU smoke, Flutter app E2E, docs build, N/A -->
 

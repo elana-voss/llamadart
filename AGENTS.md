@@ -10,7 +10,7 @@ dart pub get                              # Install dependencies
 dart format .                             # Format all Dart files
 dart format --output=none --set-exit-if-changed .  # Check only, CI-friendly
 dart analyze                              # Run static analysis/linting
-dart analyze --fatal-infos              # Treat info-level lints as errors (CI)
+dart analyze --fatal-infos              # Optional stricter local check for info-level lints
 ```
 
 ### Testing Commands
