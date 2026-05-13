@@ -1063,10 +1063,21 @@ class LlamaEngine {
   // STATE PERSISTENCE
   // ============================================================
 
-  /// Whether the active backend can save and restore KV-cache state to
-  /// disk via [stateSaveFile] / [stateLoadFile]. Native backends do; the
-  /// WebGPU backend does not.
-  bool get supportsStatePersistence => backend is BackendStatePersistence;
+  /// Whether the active backend reports state save/load support.
+  ///
+  /// Native backends persist to disk. WebGPU backends report support only after
+  /// the active JavaScript bridge exposes the `stateSaveFile` and
+  /// `stateLoadFile` APIs introduced in bridge assets `v0.1.15`; older or
+  /// custom bridge assets report false and calls throw [LlamaUnsupportedException]
+  /// before reaching the bridge.
+  bool get supportsStatePersistence {
+    final candidate = backend;
+    if (candidate is BackendStatePersistenceSupport) {
+      return (candidate as BackendStatePersistenceSupport)
+          .supportsStatePersistence;
+    }
+    return candidate is BackendStatePersistence;
+  }
 
   /// Persists the KV-cache state of the loaded model to [path] together
   /// with [tokens] — the token sequence the current state was produced
@@ -1106,6 +1117,15 @@ class LlamaEngine {
 
   BackendStatePersistence _resolveStatePersistence() {
     final candidate = backend;
+    if (candidate is BackendStatePersistenceSupport &&
+        !(candidate as BackendStatePersistenceSupport)
+            .supportsStatePersistence) {
+      throw LlamaUnsupportedException(
+        'State persistence is not supported by the active backend. '
+        'For WebGPU, use bridge assets that expose stateSaveFile/stateLoadFile '
+        '(v0.1.15 or newer).',
+      );
+    }
     if (candidate is BackendStatePersistence) {
       return candidate as BackendStatePersistence;
     }
