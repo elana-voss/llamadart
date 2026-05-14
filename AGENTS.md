@@ -10,7 +10,7 @@ dart pub get                              # Install dependencies
 dart format .                             # Format all Dart files
 dart format --output=none --set-exit-if-changed .  # Check only, CI-friendly
 dart analyze                              # Run static analysis/linting
-dart analyze --fatal-infos              # Treat info-level lints as errors (CI)
+dart analyze --fatal-infos              # Optional stricter local check for info-level lints
 ```
 
 ### Testing Commands
@@ -248,6 +248,30 @@ test -d ../llama-web-bridge-assets
 2. Run `dart analyze` to fix all warnings and lint errors
 3. Run `dart test` to verify all tests pass
 4. For new features, add tests to maintain >=70% coverage on maintainable source code (generated files are excluded via `// coverage:ignore-file`)
+
+### Production-Readiness Gate
+Treat `main` as production-ready. Before opening or updating a non-trivial PR,
+make sure the PR template can honestly answer:
+
+- **User-facing scope**: what users can do after merge, and what is explicitly
+  out of scope.
+- **Platform matrix**: native, WebGPU, Flutter examples, docs-only, or other
+  relevant paths are listed with actual validation evidence.
+- **Unsupported combinations**: unsupported platforms/options fail loudly with a
+  typed/actionable error, disabled UI, or documented fallback; never report
+  success for a path that is not implemented.
+- **Docs/release notes**: README, website docs, examples, support matrices, and
+  changelog entries are updated when public behavior changes.
+- **Regression coverage**: tests cover the issue plus important negative or
+  version-skew paths where applicable.
+- **Security/privacy**: logs, cache keys, metadata, errors, and snapshots do not
+  expose credentials, bearer tokens, signed URLs, or raw secret-bearing paths.
+- **Follow-ups**: useful but non-blocking work is tracked in GitHub Issues before
+  merge and linked from the PR body.
+
+If the implementation cannot satisfy the full originally planned scope, reduce
+and state the scope instead of merging incomplete behavior. For docs-only PRs,
+state that runtime behavior is unchanged and list the docs validation performed.
 
 ### Syncing Native Version
 When you need to update native version + bindings in this repository:
