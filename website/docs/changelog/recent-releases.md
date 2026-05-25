@@ -7,6 +7,12 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
+## Unreleased
+
+- Fixed native `getVramInfo()` so llama.cpp GPU-class backend devices can
+  report free/total VRAM when available, with Windows split-bundle registry
+  fallback handling for backend-device symbols.
+
 ## 0.6.15
 
 - Fixed GLM-OCR and other multimodal chat-template workarounds so image and

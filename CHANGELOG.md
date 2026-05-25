@@ -1,5 +1,12 @@
 ## Unreleased
 
+* **Native runtime diagnostics**:
+  * Fixed native `getVramInfo()` so it reports free/total VRAM from
+    llama.cpp GPU-class backend devices when available, using props-based
+    memory reporting first and the legacy memory probe as a fallback.
+  * Routed native VRAM probing through the ggml registry fallback path so
+    Windows split bundles resolve backend-device symbols from the runtime that
+    owns the device registry.
 * **WebGPU and chat app fixes**:
   * Improved browser recovery for large remote WebGPU model/projector loads by
     retrying wasm32 model-staging aborts with the wasm64 core before surfacing
