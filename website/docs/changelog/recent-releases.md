@@ -7,6 +7,26 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
+## 0.6.16
+
+- Improved browser recovery for large remote WebGPU model/projector loads by
+  retrying wasm32 model-staging aborts with the wasm64 core before surfacing
+  memory-pressure failures.
+- Improved the runnable chat app's web remote-model startup path so model assets
+  are prefetched into browser cache when available, browser `CacheStorage`
+  failures fall back to direct network loading, and credentialed/signed model
+  URLs skip persistent browser cache storage.
+- Improved the runnable chat app's mobile download behavior so lifecycle pauses
+  no longer deliberately cancel active foreground downloads; the app now lets
+  short screen-lock/background interruptions continue when the OS permits and
+  still keeps explicit pause/dispose cancellation paths.
+- Added in-app and docs guidance for mobile large-model downloads, including
+  resumable partial files, foreground Dart lifecycle limits, and the need for
+  opt-in native background download/model-store integrations for robust
+  cross-app GGUF management.
+- Compatibility note: no public API breaking changes in `0.6.16`; existing
+  `0.6.15` callers remain compatible.
+
 ## 0.6.15
 
 - Fixed GLM-OCR and other multimodal chat-template workarounds so image and

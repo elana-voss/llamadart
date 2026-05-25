@@ -1,4 +1,4 @@
-## Unreleased
+## 0.6.16
 
 * **WebGPU and chat app fixes**:
   * Improved browser recovery for large remote WebGPU model/projector loads by
@@ -17,6 +17,9 @@
     resumable partial files, foreground Dart lifecycle limits, and the need for
     opt-in native background download/model-store integrations for robust
     cross-app GGUF management.
+* **Compatibility note**: no public API breaking changes in `0.6.16`;
+  existing `0.6.15` callers remain compatible. The changes improve WebGPU
+  browser recovery and chat app download lifecycle behavior.
 
 ## 0.6.15
 
