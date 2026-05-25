@@ -1,4 +1,4 @@
-## Unreleased
+## 0.6.16
 
 * **Native runtime diagnostics**:
   * Fixed native `getVramInfo()` so it reports free/total VRAM from
@@ -24,6 +24,10 @@
     resumable partial files, foreground Dart lifecycle limits, and the need for
     opt-in native background download/model-store integrations for robust
     cross-app GGUF management.
+* **Compatibility note**: no public API breaking changes in `0.6.16`;
+  existing `0.6.15` callers remain compatible. The changes improve native VRAM
+  diagnostics, WebGPU browser recovery, and chat app download lifecycle
+  behavior.
 
 ## 0.6.15
 
