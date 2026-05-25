@@ -16,6 +16,22 @@ void main() {
     expect(service, isA<LlamaCppService>());
   });
 
+  group('getVramInfo', () {
+    test('returns a non-negative (total, free) record without throwing', () {
+      // Shape invariant: callers destructure these two fields. A
+      // rename or struct change in `LlamaCppService.getVramInfo`
+      // would break every backend that forwards the worker
+      // SystemInfoResponse fields. Hosts with GPU runtimes available
+      // may return real memory here; hosts without them return (0, 0).
+      final service = LlamaCppService();
+      final info = service.getVramInfo();
+      expect(info.total, isA<int>());
+      expect(info.free, isA<int>());
+      expect(info.total, greaterThanOrEqualTo(0));
+      expect(info.free, greaterThanOrEqualTo(0));
+    });
+  });
+
   group('loadModel preflight validation', () {
     late Directory tempDir;
 

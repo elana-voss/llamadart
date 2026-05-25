@@ -9,6 +9,9 @@ For canonical full release notes, use:
 
 ## 0.6.16
 
+- Fixed native `getVramInfo()` so llama.cpp GPU-class backend devices can
+  report free/total VRAM when available, with Windows split-bundle registry
+  fallback handling for backend-device symbols.
 - Improved browser recovery for large remote WebGPU model/projector loads by
   retrying wasm32 model-staging aborts with the wasm64 core before surfacing
   memory-pressure failures.

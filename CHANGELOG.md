@@ -1,5 +1,12 @@
 ## 0.6.16
 
+* **Native runtime diagnostics**:
+  * Fixed native `getVramInfo()` so it reports free/total VRAM from
+    llama.cpp GPU-class backend devices when available, using props-based
+    memory reporting first and the legacy memory probe as a fallback.
+  * Routed native VRAM probing through the ggml registry fallback path so
+    Windows split bundles resolve backend-device symbols from the runtime that
+    owns the device registry.
 * **WebGPU and chat app fixes**:
   * Improved browser recovery for large remote WebGPU model/projector loads by
     retrying wasm32 model-staging aborts with the wasm64 core before surfacing
@@ -18,8 +25,9 @@
     opt-in native background download/model-store integrations for robust
     cross-app GGUF management.
 * **Compatibility note**: no public API breaking changes in `0.6.16`;
-  existing `0.6.15` callers remain compatible. The changes improve WebGPU
-  browser recovery and chat app download lifecycle behavior.
+  existing `0.6.15` callers remain compatible. The changes improve native VRAM
+  diagnostics, WebGPU browser recovery, and chat app download lifecycle
+  behavior.
 
 ## 0.6.15
 
