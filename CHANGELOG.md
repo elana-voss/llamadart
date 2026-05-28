@@ -1,3 +1,15 @@
+## 0.6.17
+
+* **Native runtime sync**:
+  * Updated native hook pinning and regenerated bindings through
+    `leehack/llamadart-native@b9371`, picking up llama.cpp `b9371`.
+  * Picked up the Apple mobile Metal stability fix that disables Metal
+    residency sets on iOS/tvOS/visionOS native bundles, avoiding affected
+    device context-creation failures such as `MTLLibraryErrorDomain Code=3`.
+* **Compatibility note**: no public API breaking changes in `0.6.17`;
+  existing `0.6.16` callers remain compatible. The release only refreshes
+  the pinned native runtime and generated low-level bindings.
+
 ## 0.6.16
 
 * **Native runtime diagnostics**:

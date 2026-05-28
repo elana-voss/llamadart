@@ -7,6 +7,16 @@ For canonical full release notes, use:
 
 - [`CHANGELOG.md`](https://github.com/leehack/llamadart/blob/main/CHANGELOG.md)
 
+## 0.6.17
+
+- Synced native hook pinning and regenerated bindings through
+  `leehack/llamadart-native@b9371`, picking up llama.cpp `b9371`.
+- Picked up the Apple mobile Metal stability fix that disables Metal residency
+  sets on iOS/tvOS/visionOS native bundles, avoiding affected device
+  context-creation failures such as `MTLLibraryErrorDomain Code=3`.
+- Compatibility note: no public API breaking changes in `0.6.17`; existing
+  `0.6.16` callers remain compatible.
+
 ## 0.6.16
 
 - Fixed native `getVramInfo()` so llama.cpp GPU-class backend devices can
