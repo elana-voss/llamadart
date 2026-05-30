@@ -49,6 +49,42 @@ void main() {
         ),
         'WEBGPU',
       );
+
+      expect(
+        BackendUtils.deriveActiveBackendLabel(
+          'LiteRT-LM web gpu',
+          preferredBackend: GpuBackend.vulkan,
+          gpuLayers: 999,
+        ),
+        'WEBGPU',
+      );
+
+      expect(
+        BackendUtils.deriveActiveBackendLabel(
+          'LiteRT-LM gpu',
+          preferredBackend: GpuBackend.vulkan,
+          gpuLayers: 999,
+        ),
+        'GPU',
+      );
+
+      expect(
+        BackendUtils.deriveActiveBackendLabel(
+          'LiteRT-LM gpu',
+          preferredBackend: GpuBackend.auto,
+          gpuLayers: 0,
+        ),
+        'GPU',
+      );
+
+      expect(
+        BackendUtils.deriveActiveBackendLabel(
+          'LiteRT-LM cpu',
+          preferredBackend: GpuBackend.auto,
+          gpuLayers: 999,
+        ),
+        'CPU',
+      );
     });
 
     test('selects highest-priority backend from runtime text', () {

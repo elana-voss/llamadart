@@ -5,7 +5,11 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-purple.svg)](https://opensource.org/licenses/MIT)
 [![GitHub](https://img.shields.io/github/stars/leehack/llamadart?style=social)](https://github.com/leehack/llamadart)
 
-**llamadart** is a high-performance Dart and Flutter plugin for [llama.cpp](https://github.com/ggml-org/llama.cpp). It lets you run GGUF LLMs locally across native platforms and web (CPU/WebGPU bridge path).
+**llamadart** is a high-performance Dart and Flutter plugin for local LLMs. It
+runs GGUF models through [llama.cpp](https://github.com/ggml-org/llama.cpp)
+across native platforms and web (CPU/WebGPU bridge path), and routes
+`.litertlm` bundles through LiteRT-LM native runtimes or the LiteRT-LM web
+JavaScript runtime.
 
 ## 📚 Documentation
 
@@ -13,10 +17,15 @@
 - API reference: https://pub.dev/documentation/llamadart/latest/
 - Chat app demo: https://leehack-llamadart.static.hf.space
 - Migration guide: [`MIGRATION.md`](https://github.com/leehack/llamadart/blob/main/MIGRATION.md)
+- Backend selection guide: https://llamadart.leehack.com/docs/guides/backend-selection
+- Backend benchmark results: https://llamadart.leehack.com/docs/guides/backend-benchmarks
 
 ## ✨ Features
 
-- 🚀 **High Performance**: Powered by `llama.cpp` kernels.
+- 🚀 **High Performance**: Powered by `llama.cpp` kernels and LiteRT-LM native
+  and web runtimes.
+- 🧩 **Model Format Routing**: `LlamaBackend()` loads GGUF models with
+  llama.cpp and `.litertlm` bundles with LiteRT-LM on native and web targets.
 - 🛠️ **Zero Configuration**: Uses Pure Native Assets; no manual CMake or platform project edits.
 - 📱 **Cross-Platform**: Android, iOS, macOS, Linux, Windows, and web.
 - ⚡ **GPU Acceleration**:
@@ -27,7 +36,7 @@
 - 🧭 **Embeddings API**: Generate vectors with `embed(...)` and
   `embedBatch(...)`.
 - 📦 **Structured Model Sources**: Describe local, HTTP(S), and Hugging Face
-  GGUF sources with deterministic cache identities for download/cache workflows.
+  model sources with deterministic cache identities for download/cache workflows.
 - 💾 **KV-cache State Persistence**: Save and restore llama.cpp KV-cache state
   with `stateSaveFile(...)` / `stateLoadFile(...)` for fast raw-prompt resumes.
 - 🖼️ **Multimodal Support**: Vision/audio model runtime support.
@@ -42,14 +51,14 @@
 
 ```yaml
 dependencies:
-  llamadart: ^0.6.17
+  llamadart: ^0.7.0
 ```
 
 ### 2. Run with defaults
 
 On first `dart run` / `flutter run`, `llamadart` will:
 1. Detect platform/architecture.
-2. Download the matching native runtime bundle from [`leehack/llamadart-native`](https://github.com/leehack/llamadart-native).
+2. Download the matching native runtime bundles from [`leehack/llamadart-native`](https://github.com/leehack/llamadart-native) and [`leehack/litert-lm-native`](https://github.com/leehack/litert-lm-native).
 3. Wire it into your app via native assets.
 
 No manual binary download or C++ build steps are required.
@@ -57,7 +66,37 @@ No manual binary download or C++ build steps are required.
 > iOS builds require a minimum deployment target of `16.4` or newer in your
 > Xcode project / Podfile (for example `platform :ios, '16.4'`).
 
-### 3. Optional: choose native source and backend modules
+### 3. Optional: choose native runtimes for package size
+
+By default, native builds include both runtime families where available:
+
+- `llama_cpp` for GGUF models.
+- `litert_lm` for `.litertlm` model bundles.
+
+Use `llamadart_native_runtimes` when an app only ships one model format and
+you want to avoid bundling the other runtime family:
+
+```yaml
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_runtimes: [llama_cpp] # or [litert_lm]
+```
+
+The setting also supports per-target overrides:
+
+```yaml
+hooks:
+  user_defines:
+    llamadart:
+      llamadart_native_runtimes:
+        runtimes: [llama_cpp, litert_lm]
+        platforms:
+          android-arm64: [litert_lm]
+          linux-x64: [llama_cpp]
+```
+
+### 4. Optional: choose llama.cpp backend modules per target
 
 ```yaml
 hooks:
@@ -83,7 +122,11 @@ hooks:
           windows-x64: [vulkan, cuda]
 ```
 
-If a requested module is unavailable for a target, `llamadart` logs a warning and falls back to target defaults.
+`llamadart_native_backends` only filters llama.cpp modules inside the
+`llama_cpp` runtime family. It does not enable or disable LiteRT-LM. If a
+requested module is unavailable for a target, `llamadart` logs a warning and
+falls back to target defaults.
+
 If `llamadart_native_tag` points at a release without a matching bundle asset,
 the native-assets hook fails while downloading that asset.
 
@@ -106,7 +149,7 @@ For local testing, `llamadart_native_path` may point directly at a bundle
 archive, at an extracted bundle directory, or at a directory containing
 `<tag>/<bundle>/`, `<bundle>/`, or the expected archive file.
 
-### 4. Minimal first model load
+### 5. Minimal first model load
 
 ```dart
 import 'package:llamadart/llamadart.dart';
@@ -124,7 +167,29 @@ Future<void> main() async {
 }
 ```
 
-### 5. Download and cache a remote GGUF
+For LiteRT-LM bundles, use the same high-level API and pass a `.litertlm`
+path or URL. Native callers load local bundle paths; web callers load
+web-compatible `.litertlm` URLs through the LiteRT-LM JavaScript runtime.
+Android callers can opt into the LiteRT-LM NPU delegate through `ModelParams`:
+
+Sandboxed macOS apps must stage LiteRT-LM companion dylibs inside the `.app`
+bundle. The chat app example includes a `Prepare LiteRT-LM Frameworks` Xcode
+build phase that copies the pinned LiteRT-LM runtime into
+`Contents/Frameworks`. Standalone desktop VM tools also search the extracted
+`.dart_tool/llamadart/litert_lm/<version>/<platform>/<arch>` cache; set
+`LLAMADART_LITERT_LM_LIB_DIR` to that directory for custom CI or launcher
+layouts.
+
+```dart
+await engine.loadModel(
+  'path/to/gemma-4-E2B-it.litertlm',
+  modelParams: const ModelParams(
+    liteRtLmBackend: LiteRtLmBackendPreference.npu,
+  ),
+);
+```
+
+### 6. Download and cache a remote model file
 
 ```dart
 import 'package:llamadart/llamadart.dart';
@@ -161,17 +226,21 @@ cancellation and optional `sha256` verification apply, while remote/download-onl
 options such as cache policies, `cacheDirectory`, authenticated headers, resume,
 and retries are rejected for local paths.
 
-`hf://` references point at one Hugging Face file:
+`hf://` references point at one Hugging Face file, such as a `.gguf` model or
+`.litertlm` LiteRT-LM bundle:
 `hf://owner/repo/path/to/model.gguf` uses `main`,
 `hf://owner/repo@v1.0.0/model.gguf` pins a simple tag/branch, and
 `hf://owner/repo/model.gguf?revision=refs/pr/12` handles revisions containing
 slashes. For private or gated repositories, pass `ModelLoadOptions(bearerToken:
 hfToken)` or custom headers instead of embedding credentials in the source.
+For LiteRT-LM bundles, use the same `loadModelSource(...)` path with a
+`.litertlm` source and pass `ModelParams.liteRtLmBackend` when you need to pin
+CPU, GPU, or Android NPU execution after the file is cached.
 `llamadart` does not list Hugging Face files or expand sharded GGUF manifests;
 pick the exact `.gguf` file path from the repository, and use separate model and
 `mmproj` sources for multimodal assets.
 
-### 6. Generate embeddings
+### 7. Generate embeddings
 
 ```dart
 import 'package:llamadart/llamadart.dart';
@@ -246,7 +315,43 @@ persist chat messages separately when using the high-level chat API.
 | windows-arm64 / windows-x64 | cpu, vulkan | yes |
 | macos-arm64 / macos-x86_64 | cpu, METAL | no |
 | ios-arm64 / ios simulators | cpu, METAL | no |
-| web | webgpu, cpu (bridge router) | n/a |
+| web | webgpu, cpu (bridge router); LiteRT-LM JS for `.litertlm` URLs | n/a |
+
+`.gguf` models use the llama.cpp runtime matrix above. Native `.litertlm`
+models use the LiteRT-LM runtime bundles from `litert-lm-native`; the current
+FFI path is validated on Android, iOS, macOS, Linux, and Windows. Web
+`.litertlm` URLs route to the official `@litert-lm/core` JavaScript runtime,
+which is an early-preview text-in/text-out API and currently supports
+web-compatible Gemma 4 LiteRT-LM model variants. iOS LiteRT-LM bundles are
+derived from upstream `CLiteRTLM.xcframework` slices and loaded from bundled
+native-asset identifiers for device and simulator builds. Native LiteRT-LM
+generation works through the same high-level `LlamaEngine` and `ChatSession`
+APIs, including native tokenization and detokenization for exact token counts.
+On native targets, thinking and tool-call parsing run through the same
+high-level template parser for compatible models, but llama.cpp-style GBNF
+grammar constraints are not applied to `.litertlm` generation. LiteRT-LM web is
+currently limited to single-turn text prompts through `@litert-lm/core`; it does
+not yet preserve structured chat history, system prompts, tool declarations, or
+thinking/tool-call parsing with the same semantics as native. The current
+implementation does not expose embeddings, state persistence, LoRA, or
+multimodal operations through LiteRT-LM. `ChatSession` uses a conservative
+prompt-size estimate for history pruning only when exact tokenization is
+unavailable.
+`LiteRtLmBackendPreference.auto` chooses GPU on Android/macOS/web and CPU on
+other current LiteRT-LM targets; set `cpu`, `gpu`, or Android-only `npu`
+explicitly when benchmarking or pinning deployment behavior.
+`ModelParams.contextSize`, `chatTemplate`, `preferredBackend`,
+`liteRtLmBackend`, and all-or-CPU `gpuLayers` hints are honored for
+`.litertlm` loads; llama.cpp-only tuning knobs such as partial GPU layer
+offload, batch/micro-batch sizing, KV-cache type, flash attention, mmap/mlock,
+thread counts, LoRA load configs, and rope overrides are rejected instead of
+being silently ignored. `.litertlm` generation honors `GenerationParams`
+`maxTokens`, `temp`, `topK`, `topP`, and `seed` on native and web, with
+`stopSequences` enforced by llamadart. Native LiteRT-LM also honors stream
+batching thresholds. llama.cpp-only sampling and constrained-decoding controls
+such as Min-P, repeat penalty overrides, grammar/lazy grammar triggers,
+preserved tokens, custom grammar roots, and web stream batching thresholds are
+rejected until LiteRT-LM exposes equivalent runtime controls.
 
 <details>
 <summary>Full module matrix (available modules by target)</summary>
@@ -338,6 +443,11 @@ Notes:
 - Native source overrides do not regenerate Dart FFI bindings or symbol
   lookups, so the selected binary must remain compatible with the default
   runtime revision.
+- `llamadart_native_runtimes` controls whole native runtime families:
+  `llama_cpp`, `litert_lm`, or both. Use it to trim package size when an app
+  only ships GGUF or only ships `.litertlm` models.
+- `llamadart_native_backends` controls llama.cpp module files inside the
+  `llama_cpp` runtime family. It does not affect LiteRT-LM assets.
 - Configurable targets always keep `cpu` bundled as a fallback.
 - Backend-owned runtime dependencies follow the selected backend module. For
   example, CUDA runtime DLLs (`cudart64_*`, `cublas64_*`, `cublaslt64_*`) are
@@ -369,14 +479,16 @@ Notes:
   `GGML_VK_DISABLE_COOPMAT=1` and `GGML_VK_DISABLE_COOPMAT2=1`.
 
 If you change `llamadart_native_tag`, `llamadart_native_repository`,
-`llamadart_native_path`, or `llamadart_native_backends`, run `flutter clean`
-once so stale native-asset outputs do not override new bundle selection.
+`llamadart_native_path`, `llamadart_native_runtimes`, or
+`llamadart_native_backends`, run `flutter clean` once so stale native-asset
+outputs do not override new bundle selection.
 
 ---
 
 ## 🌐 Web Backend Notes (Router)
 
-The default web backend uses `WebGpuLlamaBackend` as a router for WebGPU and CPU paths.
+The default web backend routes `.gguf` URLs to `WebGpuLlamaBackend` and
+`.litertlm` URLs to `LiteRtLmBackend`.
 
 - Web mode is currently experimental and depends on an external JS bridge runtime.
 - Bridge API contract: [WebGPU bridge contract](https://github.com/leehack/llamadart/blob/main/doc/webgpu_bridge.md).
@@ -390,6 +502,16 @@ The default web backend uses `WebGpuLlamaBackend` as a router for WebGPU and CPU
 - `supportsVision` and `supportsAudio` reflect loaded projector capabilities.
 - LoRA runtime adapters are not currently supported on web.
 - `setLogLevel` / `setNativeLogLevel` changes take effect on next model load.
+- LiteRT-LM web requires preloading `@litert-lm/core` and exposing
+  `window.LiteRtLmEngine = module.Engine`, or setting
+  `window.__llamadartLiteRtLmModuleUrl` to an `@litert-lm/core` ESM URL before
+  loading a `.litertlm` model.
+- LiteRT-LM web currently supports URL/path loading, single-turn text
+  generation, CPU/GPU selection, and stop sequences. It does not yet preserve
+  `ChatSession` history, system prompts, tool declarations, thinking parsing, or
+  tool-call parsing through `@litert-lm/core`. Tokenizer APIs, embeddings, state
+  persistence, LoRA, grammar, multimodal, and NPU selection remain unsupported
+  on web.
 
 If your app targets both native and web, gate feature toggles by capability checks.
 
@@ -506,11 +628,22 @@ llamadart has decoupled runtime ownership:
 
 - Native source/build/release:
   [`leehack/llamadart-native`](https://github.com/leehack/llamadart-native)
+- LiteRT-LM native runtime release:
+  [`leehack/litert-lm-native`](https://github.com/leehack/litert-lm-native)
 - Web bridge source/build:
   [`leehack/llama-web-bridge`](https://github.com/leehack/llama-web-bridge)
 - Web bridge runtime assets:
   [`leehack/llama-web-bridge-assets`](https://github.com/leehack/llama-web-bridge-assets)
 - This repository consumes pinned published artifacts from those repositories.
+
+Current pinned runtime artifacts:
+
+| Runtime path | Published artifact |
+|--------------|--------------------|
+| Native llama.cpp / GGUF | `leehack/llamadart-native@b9371` |
+| Native LiteRT-LM / `.litertlm` | `leehack/litert-lm-native@v0.12.0` |
+| Web llama.cpp / GGUF | `leehack/llama-web-bridge-assets@v0.1.16` |
+| Web LiteRT-LM / `.litertlm` | App-provided `@litert-lm/core` module URL; the chat app defaults to jsDelivr `@litert-lm/core/+esm` |
 
 Core abstractions in this package:
 

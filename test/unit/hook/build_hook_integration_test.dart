@@ -15,11 +15,19 @@ import '../../../hook/build.dart' as build_hook;
 
 void main() {
   final nativeTag = _readHookNativeTag();
+  final litertVersion = _readHookLiteRtLmVersion();
+  final litertSha256 = _readLiteRtBundleSha256('windows-x64');
   final cacheRelativeDir =
       '.dart_tool/llamadart/native_bundles/$nativeTag/windows-x64';
   final bundleRelativePath = '$cacheRelativeDir/extracted';
   final bundleDir = Directory(bundleRelativePath);
   final backupDir = Directory('$bundleRelativePath.__hook_test_backup');
+  final litertBundleDir = Directory(
+    '.dart_tool/llamadart/litert_lm/$litertVersion/windows/x64',
+  );
+  final litertBackupDir = Directory(
+    '${litertBundleDir.path}.__hook_test_backup',
+  );
   final archivePath =
       '$cacheRelativeDir/llamadart-native-windows-x64-$nativeTag.tar.gz';
   final archiveFile = File(archivePath);
@@ -31,6 +39,12 @@ void main() {
 
     if (bundleDir.existsSync()) {
       await bundleDir.rename(backupDir.path);
+    }
+    if (litertBackupDir.existsSync()) {
+      await litertBackupDir.delete(recursive: true);
+    }
+    if (litertBundleDir.existsSync()) {
+      await litertBundleDir.rename(litertBackupDir.path);
     }
   });
 
@@ -50,6 +64,11 @@ void main() {
       'cublas64_12.dll',
       'cublaslt64_12.dll',
     ]);
+    await _writeBundleLibraries(
+      litertBundleDir,
+      _windowsLiteRtLibraries,
+      sha256: litertSha256,
+    );
 
     if (archiveFile.existsSync()) {
       await archiveFile.delete();
@@ -65,6 +84,12 @@ void main() {
     }
     if (backupDir.existsSync()) {
       await backupDir.rename(bundleDir.path);
+    }
+    if (litertBundleDir.existsSync()) {
+      await litertBundleDir.delete(recursive: true);
+    }
+    if (litertBackupDir.existsSync()) {
+      await litertBackupDir.rename(litertBundleDir.path);
     }
   });
 
@@ -108,6 +133,12 @@ void main() {
           expect(emittedNames, contains('llama-windows-x64.dll'));
           expect(emittedNames, contains('ggml-windows-x64.dll'));
           expect(emittedNames, contains('ggml-base-windows-x64.dll'));
+          for (final library in _windowsLiteRtLibraries) {
+            expect(emittedNames, contains(library));
+          }
+          for (final assetName in _windowsLiteRtAssetNames) {
+            expect(codeAssetIds, contains('package:llamadart/$assetName'));
+          }
           expect(emittedNames, isNot(contains('ggml-cuda-windows-x64.dll')));
           expect(emittedNames, isNot(contains('cudart64_12.dll')));
           expect(emittedNames, isNot(contains('cublas64_12.dll')));
@@ -116,6 +147,49 @@ void main() {
       );
     },
   );
+
+  test('build hook can emit llama.cpp runtime without LiteRT-LM', () async {
+    final userDefines = PackageUserDefines(
+      workspacePubspec: PackageUserDefinesSource(
+        defines: {
+          'llamadart_native_runtimes': ['llama_cpp'],
+          'llamadart_native_backends': {
+            'platforms': {
+              'windows-x64': ['vulkan'],
+            },
+          },
+        },
+        basePath: Directory.current.uri,
+      ),
+    );
+
+    await testCodeBuildHook(
+      mainMethod: build_hook.main,
+      targetOS: OS.windows,
+      targetArchitecture: Architecture.x64,
+      userDefines: userDefines,
+      check: (input, output) {
+        final codeAssets = output.assets.encodedAssets
+            .where((asset) => asset.isCodeAsset)
+            .map((asset) => asset.asCodeAsset)
+            .toList(growable: false);
+
+        final codeAssetIds = codeAssets.map((asset) => asset.id).toSet();
+        final emittedNames = codeAssets
+            .map((asset) => path.basename(asset.file!.toFilePath()))
+            .toSet();
+
+        expect(codeAssetIds, contains('package:llamadart/llamadart'));
+        expect(emittedNames, contains('ggml-vulkan-windows-x64.dll'));
+        for (final library in _windowsLiteRtLibraries) {
+          expect(emittedNames, isNot(contains(library)));
+        }
+        for (final assetName in _windowsLiteRtAssetNames) {
+          expect(codeAssetIds, isNot(contains('package:llamadart/$assetName')));
+        }
+      },
+    );
+  });
 
   test('build hook refreshes stale windows cache from local archive', () async {
     await _writeBundleLibraries(bundleDir, const [
@@ -518,10 +592,34 @@ String _readHookNativeTag() {
   return match.group(1)!;
 }
 
+String _readHookLiteRtLmVersion() {
+  final source = File('hook/build.dart').readAsStringSync();
+  final match = RegExp(
+    r"const _litertLmVersion = '([^']+)';",
+  ).firstMatch(source);
+  if (match == null) {
+    throw StateError('Could not locate _litertLmVersion in hook/build.dart');
+  }
+  return match.group(1)!;
+}
+
+String _readLiteRtBundleSha256(String bundleKey) {
+  final source = File('hook/build.dart').readAsStringSync();
+  final escapedKey = RegExp.escape(bundleKey);
+  final match = RegExp(
+    "'$escapedKey':\\s*_LiteRtLmBundleSpec\\([\\s\\S]*?sha256:\\s*'([^']+)'",
+  ).firstMatch(source);
+  if (match == null) {
+    throw StateError('Could not locate LiteRT-LM checksum for $bundleKey');
+  }
+  return match.group(1)!;
+}
+
 Future<void> _writeBundleLibraries(
   Directory bundleDir,
-  List<String> fileNames,
-) async {
+  List<String> fileNames, {
+  String? sha256,
+}) async {
   if (bundleDir.existsSync()) {
     await bundleDir.delete(recursive: true);
   }
@@ -529,7 +627,30 @@ Future<void> _writeBundleLibraries(
   for (final name in fileNames) {
     await File(path.join(bundleDir.path, name)).writeAsString('fake-$name');
   }
+  if (sha256 != null) {
+    await File(
+      path.join(bundleDir.path, '.llamadart_litert_lm.sha256'),
+    ).writeAsString('$sha256\n');
+  }
 }
+
+const List<String> _windowsLiteRtLibraries = [
+  'LiteRtLm.dll',
+  'StreamProxy.dll',
+  'libGemmaModelConstraintProvider.dll',
+  'libLiteRt.dll',
+  'libLiteRtTopKWebGpuSampler.dll',
+  'libLiteRtWebGpuAccelerator.dll',
+];
+
+const List<String> _windowsLiteRtAssetNames = [
+  'litert_lm_LiteRtLm',
+  'litert_lm_StreamProxy',
+  'litert_lm_GemmaModelConstraintProvider',
+  'litert_lm_LiteRt',
+  'litert_lm_LiteRtTopKWebGpuSampler',
+  'litert_lm_LiteRtWebGpuAccelerator',
+];
 
 Future<void> _writeBundleArchive({
   required File archiveFile,

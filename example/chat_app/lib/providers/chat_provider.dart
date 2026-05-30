@@ -486,6 +486,14 @@ class ChatProvider extends ChangeNotifier {
     return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
   }
 
+  bool _isLiteRtLmModelPath(String? value) {
+    if (value == null || value.isEmpty) {
+      return false;
+    }
+    final withoutQuery = value.split('?').first.split('#').first;
+    return withoutQuery.toLowerCase().endsWith('.litertlm');
+  }
+
   bool _hasPersistentCacheSensitiveUrlParts(String? value) {
     if (!_isRemoteUrl(value)) {
       return false;
@@ -725,7 +733,8 @@ class ChatProvider extends ChangeNotifier {
     updateLoadingUi(0.04, forceNotify: true);
 
     // Estimate dynamic settings only when backend preference remains Auto.
-    if (_settings.preferredBackend == GpuBackend.auto &&
+    if (!_isLiteRtLmModelPath(_settings.modelPath) &&
+        _settings.preferredBackend == GpuBackend.auto &&
         (_settings.gpuLayers == 32 || _settings.gpuLayers == 99)) {
       try {
         await estimateDynamicSettings();
@@ -1166,6 +1175,7 @@ class ChatProvider extends ChangeNotifier {
     );
     _lastFirstTokenLatencyMs = null;
     final toolsForTurn = _toolsForTurn();
+    var appliedGeneratedTokenDeltas = 0;
     var hasMediaPartsInTurn = false;
     var hasAudioPartsInTurn = false;
     var isCpuMultimodalTurn = false;
@@ -1232,6 +1242,7 @@ class ChatProvider extends ChangeNotifier {
             stallTimeout: streamStallTimeout,
             onUpdate: (update) {
               _currentTokens += update.generatedTokenDelta;
+              appliedGeneratedTokenDeltas += update.generatedTokenDelta;
 
               final shouldRefreshStreamingMessage =
                   update.shouldNotify || update.generatedTokenDelta == 0;
@@ -1411,18 +1422,9 @@ class ChatProvider extends ChangeNotifier {
       final generatedTokens = generationResult.generatedTokens;
       final elapsedMs = generationResult.elapsedMs;
       final decodeElapsedMs = generationResult.decodeElapsedMs;
-      if (generatedTokens > 0 && elapsedMs > 0) {
-        _lastTokensPerSecond = generatedTokens / (elapsedMs / 1000);
-      } else {
-        _lastTokensPerSecond = null;
-      }
 
-      if (generatedTokens > 0 && decodeElapsedMs > 0) {
-        _lastDecodeTokensPerSecond = generatedTokens / (decodeElapsedMs / 1000);
-      } else {
-        _lastDecodeTokensPerSecond = null;
-      }
-
+      int? nativeEvalTokens;
+      double? nativeEvalMs;
       try {
         final perf = await _chatService.engine.getPerformanceContext();
         if (perf != null) {
@@ -1432,6 +1434,8 @@ class ChatProvider extends ChangeNotifier {
           _lastNativePromptEvalTokens = perf.promptEvalTokens;
           _lastNativeEvalTokens = perf.evalTokens;
           _lastNativeReusedGraphs = perf.reusedGraphs;
+          nativeEvalTokens = perf.evalTokens;
+          nativeEvalMs = perf.evalMs;
         } else {
           _lastNativePromptEvalMs = null;
           _lastNativeEvalMs = null;
@@ -1447,6 +1451,31 @@ class ChatProvider extends ChangeNotifier {
         _lastNativePromptEvalTokens = null;
         _lastNativeEvalTokens = null;
         _lastNativeReusedGraphs = null;
+      }
+
+      final effectiveGeneratedTokens = nativeEvalTokens ?? generatedTokens;
+      if (nativeEvalTokens != null &&
+          nativeEvalTokens != appliedGeneratedTokenDeltas) {
+        _currentTokens = math.max(
+          0,
+          _currentTokens + nativeEvalTokens - appliedGeneratedTokenDeltas,
+        );
+      }
+
+      if (effectiveGeneratedTokens > 0 && elapsedMs > 0) {
+        _lastTokensPerSecond = effectiveGeneratedTokens / (elapsedMs / 1000);
+      } else {
+        _lastTokensPerSecond = null;
+      }
+
+      final effectiveDecodeElapsedMs = nativeEvalMs != null && nativeEvalMs > 0
+          ? nativeEvalMs
+          : decodeElapsedMs.toDouble();
+      if (effectiveGeneratedTokens > 0 && effectiveDecodeElapsedMs > 0) {
+        _lastDecodeTokensPerSecond =
+            effectiveGeneratedTokens / (effectiveDecodeElapsedMs / 1000);
+      } else {
+        _lastDecodeTokensPerSecond = null;
       }
 
       if (generationResult.firstTokenLatencyMs != null ||

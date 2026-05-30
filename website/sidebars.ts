@@ -18,6 +18,7 @@ const sidebars: SidebarsConfig = {
       label: 'Core Concepts',
       items: [
         'guides/architecture',
+        'guides/backend-selection',
         'guides/api-levels',
         'guides/model-lifecycle',
         'guides/generation-and-streaming',
@@ -41,6 +42,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'configuration/runtime-parameters',
         'guides/performance-tuning',
+        'guides/backend-benchmarks',
         'configuration/logging'
       ]
     },

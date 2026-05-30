@@ -50,7 +50,7 @@ class _ThinkingSplitResult {
 /// Example (OpenAI-style stateless usage):
 /// ```dart
 /// final engine = LlamaEngine(LlamaBackend());
-/// await engine.loadModel('path/to/model.gguf');
+/// await engine.loadModel('path/to/model.gguf'); // or model.litertlm on native
 ///
 /// // Build messages array (you manage history)
 /// final messages = [
@@ -313,6 +313,9 @@ class LlamaEngine {
         e,
         stackTrace,
       );
+      if (e is UnsupportedError) {
+        throw _unsupportedBackendOperation('Multimodal projectors', e);
+      }
       rethrow;
     }
   }
@@ -441,7 +444,20 @@ class LlamaEngine {
     // Collect media parts from all messages
     final allParts = messages.expand((m) => m.parts).toList();
 
-    final hasTemplateGrammar = result.grammar != null;
+    final activeBackend = backend;
+    final backendSupportsGrammarConstraints =
+        activeBackend is BackendGrammarConstraintsSupport
+        ? (activeBackend as BackendGrammarConstraintsSupport)
+              .supportsGrammarConstraints
+        : true;
+    if (!backendSupportsGrammarConstraints && result.grammar != null) {
+      LlamaLogger.instance.debug(
+        '  Template grammar skipped: backend does not support grammar constraints',
+      );
+    }
+
+    final hasTemplateGrammar =
+        result.grammar != null && backendSupportsGrammarConstraints;
     final effectiveGrammar = hasTemplateGrammar
         ? result.grammar
         : params?.grammar;
@@ -460,7 +476,7 @@ class LlamaEngine {
               .toList(growable: false)
         : (params?.grammarTriggers ?? const <GenerationGrammarTrigger>[]);
     final effectivePreservedTokens = {
-      ...result.preservedTokens,
+      if (backendSupportsGrammarConstraints) ...result.preservedTokens,
       ...?params?.preservedTokens,
     }.toList(growable: false);
 
@@ -935,8 +951,20 @@ class LlamaEngine {
 
       int? tokenCount;
       if (includeTokenCount) {
-        final tokens = await tokenize(result.prompt, addSpecial: false);
-        tokenCount = tokens.length;
+        try {
+          final tokens = await tokenize(result.prompt, addSpecial: false);
+          tokenCount = tokens.length;
+        } on UnsupportedError catch (error) {
+          LlamaLogger.instance.debug(
+            'Skipping chat template token count because backend tokenization '
+            'is unsupported: $error',
+          );
+        } on LlamaUnsupportedException catch (error) {
+          LlamaLogger.instance.debug(
+            'Skipping chat template token count because backend tokenization '
+            'is unsupported: $error',
+          );
+        }
       }
 
       return LlamaChatTemplateResult(
@@ -976,14 +1004,22 @@ class LlamaEngine {
   }) async* {
     _ensureReady();
 
-    final stream = backend.generate(
-      _contextHandle!,
-      prompt,
-      params,
-      parts: parts,
-    );
+    try {
+      final stream = backend.generate(
+        _contextHandle!,
+        prompt,
+        params,
+        parts: parts,
+      );
 
-    yield* stream.transform(const Utf8Decoder(allowMalformed: true));
+      await for (final token in stream.transform(
+        const Utf8Decoder(allowMalformed: true),
+      )) {
+        yield token;
+      }
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('Generation', error);
+    }
   }
 
   /// Immediately cancels any ongoing generation process.
@@ -996,15 +1032,27 @@ class LlamaEngine {
   // ============================================================
 
   /// Encodes the given [text] into a list of token IDs.
-  Future<List<int>> tokenize(String text, {bool addSpecial = true}) {
+  Future<List<int>> tokenize(String text, {bool addSpecial = true}) async {
     _ensureReady(requireContext: false);
-    return backend.tokenize(_modelHandle!, text, addSpecial: addSpecial);
+    try {
+      return await backend.tokenize(
+        _modelHandle!,
+        text,
+        addSpecial: addSpecial,
+      );
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('Tokenization', error);
+    }
   }
 
   /// Decodes a list of [tokens] back into a human-readable string.
-  Future<String> detokenize(List<int> tokens, {bool special = false}) {
+  Future<String> detokenize(List<int> tokens, {bool special = false}) async {
     _ensureReady(requireContext: false);
-    return backend.detokenize(_modelHandle!, tokens, special: special);
+    try {
+      return await backend.detokenize(_modelHandle!, tokens, special: special);
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('Detokenization', error);
+    }
   }
 
   /// Utility to count the number of tokens in [text] without running inference.
@@ -1020,10 +1068,18 @@ class LlamaEngine {
   /// Generates a single embedding vector for [text].
   ///
   /// When [normalize] is true, the returned vector is L2-normalized.
-  Future<List<double>> embed(String text, {bool normalize = true}) {
+  Future<List<double>> embed(String text, {bool normalize = true}) async {
     _ensureReady();
-    final embeddingBackend = _resolveEmbeddingBackend();
-    return embeddingBackend.embed(_contextHandle!, text, normalize: normalize);
+    try {
+      final embeddingBackend = _resolveEmbeddingBackend();
+      return await embeddingBackend.embed(
+        _contextHandle!,
+        text,
+        normalize: normalize,
+      );
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('Embeddings', error);
+    }
   }
 
   /// Generates embedding vectors for all [texts] in order.
@@ -1039,24 +1095,61 @@ class LlamaEngine {
     }
 
     final embeddingBackend = _resolveEmbeddingBackend();
-    if (embeddingBackend is BackendBatchEmbeddings) {
-      return embeddingBackend.embedBatch(
-        _contextHandle!,
-        texts,
-        normalize: normalize,
+    try {
+      if (embeddingBackend is BackendBatchEmbeddings) {
+        return await embeddingBackend.embedBatch(
+          _contextHandle!,
+          texts,
+          normalize: normalize,
+        );
+      }
+
+      final vectors = <List<double>>[];
+      for (final text in texts) {
+        final vector = await embeddingBackend.embed(
+          _contextHandle!,
+          text,
+          normalize: normalize,
+        );
+        vectors.add(vector);
+      }
+      return vectors;
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('Embeddings', error);
+    }
+  }
+
+  LlamaUnsupportedException _unsupportedBackendOperation(
+    String operation,
+    UnsupportedError error,
+  ) {
+    final message = error.message;
+    final detail = message == null ? '' : message.toString();
+    if (detail.isEmpty) {
+      return LlamaUnsupportedException(
+        '$operation is not supported by the active backend.',
       );
+    }
+    return LlamaUnsupportedException(
+      '$operation is not supported by the active backend: $detail',
+    );
+  }
+
+  BackendEmbeddings _resolveEmbeddingBackend() {
+    final candidate = backend;
+    if (candidate is BackendEmbeddingsSupport &&
+        !(candidate as BackendEmbeddingsSupport).supportsEmbeddings) {
+      throw LlamaUnsupportedException(
+        'Embeddings are not supported by the active backend.',
+      );
+    }
+    if (candidate is BackendEmbeddings) {
+      return candidate as BackendEmbeddings;
     }
 
-    final vectors = <List<double>>[];
-    for (final text in texts) {
-      final vector = await embeddingBackend.embed(
-        _contextHandle!,
-        text,
-        normalize: normalize,
-      );
-      vectors.add(vector);
-    }
-    return vectors;
+    throw LlamaUnsupportedException(
+      'Embeddings are not supported by the active backend.',
+    );
   }
 
   // ============================================================
@@ -1089,10 +1182,14 @@ class LlamaEngine {
   /// across builds, and tied to the same model used at save time.
   ///
   /// Returns true on success.
-  Future<bool> stateSaveFile(String path, {required List<int> tokens}) {
+  Future<bool> stateSaveFile(String path, {required List<int> tokens}) async {
     _ensureReady();
-    final persistence = _resolveStatePersistence();
-    return persistence.stateSaveFile(_contextHandle!, path, tokens);
+    final persistence = await _resolveStatePersistence();
+    try {
+      return await persistence.stateSaveFile(_contextHandle!, path, tokens);
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('State persistence', error);
+    }
   }
 
   /// Restores a previously saved state from [path]. [tokenCapacity]
@@ -1109,21 +1206,27 @@ class LlamaEngine {
   Future<StateLoadResult> stateLoadFile(
     String path, {
     required int tokenCapacity,
-  }) {
+  }) async {
     _ensureReady();
-    final persistence = _resolveStatePersistence();
-    return persistence.stateLoadFile(_contextHandle!, path, tokenCapacity);
+    final persistence = await _resolveStatePersistence();
+    try {
+      return await persistence.stateLoadFile(
+        _contextHandle!,
+        path,
+        tokenCapacity,
+      );
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('State persistence', error);
+    }
   }
 
-  BackendStatePersistence _resolveStatePersistence() {
+  Future<BackendStatePersistence> _resolveStatePersistence() async {
     final candidate = backend;
     if (candidate is BackendStatePersistenceSupport &&
         !(candidate as BackendStatePersistenceSupport)
             .supportsStatePersistence) {
       throw LlamaUnsupportedException(
-        'State persistence is not supported by the active backend. '
-        'For WebGPU, use bridge assets that expose stateSaveFile/stateLoadFile '
-        '(v0.1.15 or newer).',
+        await _statePersistenceUnsupportedMessage(),
       );
     }
     if (candidate is BackendStatePersistence) {
@@ -1132,6 +1235,30 @@ class LlamaEngine {
     throw LlamaUnsupportedException(
       'State persistence is not supported by the active backend.',
     );
+  }
+
+  Future<String> _statePersistenceUnsupportedMessage() async {
+    String backendName = '';
+    try {
+      backendName = await backend.getBackendName();
+    } catch (_) {
+      // Fall back to the generic message when backend diagnostics are not
+      // available on the active runtime.
+    }
+
+    final normalizedBackendName = backendName.toLowerCase();
+    if (normalizedBackendName.contains('litert-lm')) {
+      return 'State persistence is not supported by the active LiteRT-LM '
+          'backend because the LiteRT-LM APIs exposed through llamadart do not '
+          'provide KV-cache save/load yet.';
+    }
+    if (normalizedBackendName.contains('webgpu') ||
+        normalizedBackendName.contains('web gpu')) {
+      return 'State persistence is not supported by the active backend. '
+          'For WebGPU, use bridge assets that expose '
+          'stateSaveFile/stateLoadFile (v0.1.15 or newer).';
+    }
+    return 'State persistence is not supported by the active backend.';
   }
 
   // ============================================================
@@ -1180,21 +1307,33 @@ class LlamaEngine {
   // ============================================================
 
   /// Dynamically loads or updates a LoRA adapter's scale.
-  Future<void> setLora(String path, {double scale = 1.0}) {
+  Future<void> setLora(String path, {double scale = 1.0}) async {
     _ensureReady();
-    return backend.setLoraAdapter(_contextHandle!, path, scale);
+    try {
+      await backend.setLoraAdapter(_contextHandle!, path, scale);
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('LoRA adapters', error);
+    }
   }
 
   /// Removes a specific LoRA adapter from the active session.
-  Future<void> removeLora(String path) {
+  Future<void> removeLora(String path) async {
     _ensureReady();
-    return backend.removeLoraAdapter(_contextHandle!, path);
+    try {
+      await backend.removeLoraAdapter(_contextHandle!, path);
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('LoRA adapters', error);
+    }
   }
 
   /// Removes all active LoRA adapters from the current context.
-  Future<void> clearLoras() {
+  Future<void> clearLoras() async {
     _ensureReady();
-    return backend.clearLoraAdapters(_contextHandle!);
+    try {
+      await backend.clearLoraAdapters(_contextHandle!);
+    } on UnsupportedError catch (error) {
+      throw _unsupportedBackendOperation('LoRA adapters', error);
+    }
   }
 
   // ============================================================
@@ -1261,17 +1400,6 @@ class LlamaEngine {
     final metadata = await getMetadata();
     _cachedModelMetadata = Map<String, String>.from(metadata);
     return Map<String, String>.from(_cachedModelMetadata!);
-  }
-
-  BackendEmbeddings _resolveEmbeddingBackend() {
-    final candidate = backend;
-    if (candidate is BackendEmbeddings) {
-      return candidate as BackendEmbeddings;
-    }
-
-    throw LlamaUnsupportedException(
-      'Embeddings are not supported by the active backend.',
-    );
   }
 
   bool _mayNeedStructuredPartialParse(String token) {

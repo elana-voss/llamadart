@@ -30,6 +30,17 @@ class BackendUtils {
     required GpuBackend preferredBackend,
     required int gpuLayers,
   }) {
+    final lower = backendInfo.toLowerCase();
+
+    final isLiteRtLm = lower.contains('litert-lm');
+    final isLiteRtGpu = isLiteRtLm && lower.contains('gpu');
+    if (isLiteRtGpu) {
+      return lower.contains('web') ? 'WEBGPU' : 'GPU';
+    }
+    if (isLiteRtLm && lower.contains('cpu')) {
+      return 'CPU';
+    }
+
     if (preferredBackend == GpuBackend.cpu || gpuLayers == 0) {
       return 'CPU';
     }
@@ -43,8 +54,11 @@ class BackendUtils {
       return 'CPU';
     }
 
-    final lower = backendInfo.toLowerCase();
-    if (lower.contains('webgpu') || lower.contains('wgpu')) {
+    if (lower.contains('webgpu') ||
+        lower.contains('wgpu') ||
+        (lower.contains('litert-lm') &&
+            lower.contains('web') &&
+            lower.contains('gpu'))) {
       return 'WEBGPU';
     }
 

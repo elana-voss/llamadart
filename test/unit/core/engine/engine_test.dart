@@ -29,6 +29,8 @@ class MockLlamaBackend
   int modelMetadataCalls = 0;
   String generationText = 'response';
   List<String>? generationChunks;
+  String? lastGenerationPrompt;
+  GenerationParams? lastGenerationParams;
   final String backendName;
   final bool urlLoadingSupported;
   final bool failModelLoad;
@@ -94,6 +96,8 @@ class MockLlamaBackend
     GenerationParams params, {
     List<LlamaContentPart>? parts,
   }) async* {
+    lastGenerationPrompt = prompt;
+    lastGenerationParams = params;
     if (generationChunks != null) {
       for (final chunk in generationChunks!) {
         yield utf8.encode(chunk);
@@ -205,6 +209,34 @@ class MockLlamaBackend
   }) async {
     return messages.map((m) => "${m['role']}: ${m['content']}").join('\n');
   }
+}
+
+class UnsupportedTokenizationBackend extends MockLlamaBackend {
+  @override
+  Future<List<int>> tokenize(
+    int modelHandle,
+    String text, {
+    bool addSpecial = true,
+  }) async {
+    tokenizeCalls += 1;
+    throw UnsupportedError('tokenization unavailable');
+  }
+}
+
+class UnsupportedStateBackend extends MockLlamaBackend
+    implements BackendStatePersistenceSupport {
+  UnsupportedStateBackend({required super.backendName});
+
+  @override
+  bool get supportsStatePersistence => false;
+}
+
+class NoGrammarMockLlamaBackend extends MockLlamaBackend
+    implements BackendGrammarConstraintsSupport {
+  NoGrammarMockLlamaBackend({super.modelMetadataResponse});
+
+  @override
+  bool get supportsGrammarConstraints => false;
 }
 
 class MockModelResolver implements ModelResolver {
@@ -765,6 +797,43 @@ void main() {
       );
     });
 
+    test('state persistence unsupported message is backend-aware', () async {
+      final stateBackend = UnsupportedStateBackend(backendName: 'Mock');
+      final stateEngine = LlamaEngine(stateBackend);
+      await stateEngine.loadModel('qwen-test.gguf');
+
+      await expectLater(
+        stateEngine.stateSaveFile('/tmp/state.bin', tokens: const []),
+        throwsA(
+          isA<LlamaUnsupportedException>().having(
+            (error) => error.message,
+            'message',
+            'State persistence is not supported by the active backend.',
+          ),
+        ),
+      );
+    });
+
+    test(
+      'state persistence unsupported keeps WebGPU bridge guidance',
+      () async {
+        final stateBackend = UnsupportedStateBackend(backendName: 'WebGPU');
+        final stateEngine = LlamaEngine(stateBackend);
+        await stateEngine.loadModel('qwen-test.gguf');
+
+        await expectLater(
+          stateEngine.stateLoadFile('/tmp/state.bin', tokenCapacity: 16),
+          throwsA(
+            isA<LlamaUnsupportedException>().having(
+              (error) => error.message,
+              'message',
+              allOf(contains('WebGPU'), contains('stateSaveFile')),
+            ),
+          ),
+        );
+      },
+    );
+
     test('embed returns normalized vector by default', () async {
       final embeddingBackend = MockEmbeddingBackend();
       final embeddingEngine = LlamaEngine(embeddingBackend);
@@ -835,6 +904,25 @@ void main() {
       expect(result.prompt, '<s>user: hiassistant: ');
       expect(result.tokenCount, isNull);
       expect(backend.tokenizeCalls, 0);
+    });
+
+    test('chatTemplate tolerates backends without tokenization', () async {
+      final tokenlessBackend = UnsupportedTokenizationBackend();
+      final tokenlessEngine = LlamaEngine(tokenlessBackend);
+
+      try {
+        await tokenlessEngine.loadModel('gemma-4-E2B-it.litertlm');
+
+        final result = await tokenlessEngine.chatTemplate(const [
+          LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+        ]);
+
+        expect(result.prompt, '<s>user: hiassistant: ');
+        expect(result.tokenCount, isNull);
+        expect(tokenlessBackend.tokenizeCalls, 1);
+      } finally {
+        await tokenlessEngine.dispose();
+      }
     });
 
     test('create reuses cached metadata across requests', () async {
@@ -912,6 +1000,55 @@ void main() {
       expect(toolCalls!.first.id, equals('call_0'));
       expect(toolCalls.first.function?.name, equals('get_weather'));
     });
+
+    test(
+      'create skips template grammar for backends without grammar constraints',
+      () async {
+        final noGrammarBackend = NoGrammarMockLlamaBackend(
+          modelMetadataResponse: const {
+            'llm.context_length': '4096',
+            'tokenizer.chat_template':
+                '<|turn>user\n{{ messages[0]["content"] }}<turn|>{% if add_generation_prompt %}<|turn>model\n{% endif %}',
+          },
+        );
+        final noGrammarEngine = LlamaEngine(noGrammarBackend);
+        noGrammarBackend.generationText =
+            '<|tool_call>call:get_weather{location:<|"|>Seoul<|"|>}<tool_call|>';
+
+        await noGrammarEngine.loadModel('gemma4-test.litertlm');
+
+        final chunks = await noGrammarEngine
+            .create(
+              const [
+                LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+              ],
+              tools: [
+                ToolDefinition(
+                  name: 'get_weather',
+                  description: 'Get weather',
+                  parameters: [ToolParam.string('location')],
+                  handler: (_) async => 'ok',
+                ),
+              ],
+            )
+            .toList();
+
+        expect(noGrammarBackend.lastGenerationParams?.grammar, isNull);
+        expect(noGrammarBackend.lastGenerationParams?.grammarLazy, isFalse);
+        expect(noGrammarBackend.lastGenerationParams?.grammarTriggers, isEmpty);
+        expect(noGrammarBackend.lastGenerationParams?.preservedTokens, isEmpty);
+
+        final toolChunk = chunks.last;
+        expect(toolChunk.choices.first.finishReason, equals('tool_calls'));
+        final toolCalls = toolChunk.choices.first.delta.toolCalls;
+        expect(toolCalls, hasLength(1));
+        expect(toolCalls!.first.function?.name, equals('get_weather'));
+        expect(
+          jsonDecode(toolCalls.first.function!.arguments!),
+          equals({'location': 'Seoul'}),
+        );
+      },
+    );
 
     test('create does not stream raw tool-call JSON as content', () async {
       backend.generationText =

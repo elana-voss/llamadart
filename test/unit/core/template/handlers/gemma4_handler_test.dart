@@ -40,6 +40,36 @@ void main() {
       expect(disabled.prompt, isNot(contains('<|think|>')));
     });
 
+    test('marks prompts ending with a thought channel as forced open', () {
+      const template =
+          '<|turn>user\n{{ messages[0]["content"] }}<turn|>\n'
+          '{% if add_generation_prompt %}<|turn>model\n'
+          '{% if enable_thinking %}<|channel>thought\n{% endif %}'
+          '{% endif %}';
+
+      final enabled = ChatTemplateEngine.render(
+        templateSource: template,
+        messages: const [
+          LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+        ],
+        metadata: const {},
+        enableThinking: true,
+      );
+      final disabled = ChatTemplateEngine.render(
+        templateSource: template,
+        messages: const [
+          LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+        ],
+        metadata: const {},
+        enableThinking: false,
+      );
+
+      expect(enabled.thinkingForcedOpen, isTrue);
+      expect(enabled.prompt, endsWith('<|channel>thought\n'));
+      expect(disabled.thinkingForcedOpen, isFalse);
+      expect(disabled.prompt, isNot(contains('<|channel>thought')));
+    });
+
     test('parses reasoning blocks and pseudo-json tool arguments', () {
       const output =
           '<|channel>thought\nNeed weather data.<channel|>'
@@ -73,6 +103,20 @@ void main() {
       );
     });
 
+    test('parses loose function call syntax emitted by Gemma 4 LiteRT-LM', () {
+      const output = 'get_weather(location="Seoul")';
+
+      final parsed = ChatTemplateEngine.parse(ChatFormat.gemma4.index, output);
+
+      expect(parsed.content, isEmpty);
+      expect(parsed.toolCalls, hasLength(1));
+      expect(parsed.toolCalls.first.function?.name, equals('get_weather'));
+      expect(
+        jsonDecode(parsed.toolCalls.first.function!.arguments!),
+        equals({'location': 'Seoul'}),
+      );
+    });
+
     test('streams an open thought channel as partial reasoning', () {
       const output = '<|channel>thought\nNeed weather';
 
@@ -84,6 +128,27 @@ void main() {
 
       expect(parsed.reasoningContent, equals('Need weather'));
       expect(parsed.content, isEmpty);
+    });
+
+    test('parses output after a force-opened thought channel', () {
+      final thinkingOnly = ChatTemplateEngine.parse(
+        ChatFormat.gemma4.index,
+        'Need a short calculation.',
+        thinkingForcedOpen: true,
+      );
+      final closed = ChatTemplateEngine.parse(
+        ChatFormat.gemma4.index,
+        'Need a short calculation.<channel|>391',
+        thinkingForcedOpen: true,
+      );
+
+      expect(
+        thinkingOnly.reasoningContent,
+        equals('Need a short calculation.'),
+      );
+      expect(thinkingOnly.content, isEmpty);
+      expect(closed.reasoningContent, equals('Need a short calculation.'));
+      expect(closed.content, equals('391'));
     });
 
     test('serializes tool responses for Gemma 4 templates', () {

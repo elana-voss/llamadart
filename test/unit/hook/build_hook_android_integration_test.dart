@@ -12,11 +12,19 @@ import '../../../hook/build.dart' as build_hook;
 
 void main() {
   final nativeTag = _readHookNativeTag();
+  final litertVersion = _readHookLiteRtLmVersion();
+  final litertSha256 = _readLiteRtBundleSha256('android-arm64');
   final cacheRelativeDir =
       '.dart_tool/llamadart/native_bundles/$nativeTag/android-arm64';
   final bundleRelativePath = '$cacheRelativeDir/extracted';
   final bundleDir = Directory(bundleRelativePath);
   final backupDir = Directory('$bundleRelativePath.__hook_test_backup');
+  final litertBundleDir = Directory(
+    '.dart_tool/llamadart/litert_lm/$litertVersion/android/arm64',
+  );
+  final litertBackupDir = Directory(
+    '${litertBundleDir.path}.__hook_test_backup',
+  );
 
   setUpAll(() async {
     if (backupDir.existsSync()) {
@@ -26,6 +34,12 @@ void main() {
     if (bundleDir.existsSync()) {
       await bundleDir.rename(backupDir.path);
     }
+    if (litertBackupDir.existsSync()) {
+      await litertBackupDir.delete(recursive: true);
+    }
+    if (litertBundleDir.existsSync()) {
+      await litertBundleDir.rename(litertBackupDir.path);
+    }
   });
 
   setUp(() async {
@@ -33,6 +47,11 @@ void main() {
       await bundleDir.delete(recursive: true);
     }
     await _writeBundleLibraries(bundleDir, _androidArm64Libraries);
+    await _writeBundleLibraries(
+      litertBundleDir,
+      _androidLiteRtLibraries,
+      sha256: litertSha256,
+    );
   });
 
   tearDownAll(() async {
@@ -41,6 +60,12 @@ void main() {
     }
     if (backupDir.existsSync()) {
       await backupDir.rename(bundleDir.path);
+    }
+    if (litertBundleDir.existsSync()) {
+      await litertBundleDir.delete(recursive: true);
+    }
+    if (litertBackupDir.existsSync()) {
+      await litertBackupDir.rename(litertBundleDir.path);
     }
   });
 
@@ -71,6 +96,7 @@ void main() {
             .map((asset) => asset.asCodeAsset)
             .toList(growable: false);
 
+        final codeAssetIds = codeAssets.map((asset) => asset.id).toSet();
         final emittedNames = codeAssets
             .map((asset) => path.basename(asset.file!.toFilePath()))
             .toSet();
@@ -83,6 +109,12 @@ void main() {
 
         for (final variant in _androidCpuVariantLibraries) {
           expect(emittedNames, contains(variant));
+        }
+        for (final library in _androidLiteRtLibraries) {
+          expect(emittedNames, contains(library));
+        }
+        for (final assetName in _androidLiteRtAssetNames) {
+          expect(codeAssetIds, contains('package:llamadart/$assetName'));
         }
       },
     );
@@ -198,6 +230,30 @@ const List<String> _androidArm64Libraries = [
   ..._androidCpuVariantLibraries,
 ];
 
+const List<String> _androidLiteRtLibraries = [
+  'libGemmaModelConstraintProvider.so',
+  'libLiteRt.so',
+  'libLiteRtGpuAccelerator.so',
+  'libLiteRtLm.so',
+  'libLiteRtOpenClAccelerator.so',
+  'libLiteRtTopKOpenClSampler.so',
+  'libLiteRtTopKWebGpuSampler.so',
+  'libLiteRtWebGpuAccelerator.so',
+  'libStreamProxy.so',
+];
+
+const List<String> _androidLiteRtAssetNames = [
+  'litert_lm_GemmaModelConstraintProvider',
+  'litert_lm_LiteRt',
+  'litert_lm_LiteRtGpuAccelerator',
+  'litert_lm_LiteRtLm',
+  'litert_lm_LiteRtOpenClAccelerator',
+  'litert_lm_LiteRtTopKOpenClSampler',
+  'litert_lm_LiteRtTopKWebGpuSampler',
+  'litert_lm_LiteRtWebGpuAccelerator',
+  'litert_lm_StreamProxy',
+];
+
 String _readHookNativeTag() {
   final source = File('hook/build.dart').readAsStringSync();
   final match = RegExp(r"const _llamaCppTag = '([^']+)';").firstMatch(source);
@@ -207,15 +263,44 @@ String _readHookNativeTag() {
   return match.group(1)!;
 }
 
+String _readHookLiteRtLmVersion() {
+  final source = File('hook/build.dart').readAsStringSync();
+  final match = RegExp(
+    r"const _litertLmVersion = '([^']+)';",
+  ).firstMatch(source);
+  if (match == null) {
+    throw StateError('Could not locate _litertLmVersion in hook/build.dart');
+  }
+  return match.group(1)!;
+}
+
+String _readLiteRtBundleSha256(String bundleKey) {
+  final source = File('hook/build.dart').readAsStringSync();
+  final escapedKey = RegExp.escape(bundleKey);
+  final match = RegExp(
+    "'$escapedKey':\\s*_LiteRtLmBundleSpec\\([\\s\\S]*?sha256:\\s*'([^']+)'",
+  ).firstMatch(source);
+  if (match == null) {
+    throw StateError('Could not locate LiteRT-LM checksum for $bundleKey');
+  }
+  return match.group(1)!;
+}
+
 Future<void> _writeBundleLibraries(
   Directory bundleDir,
-  List<String> fileNames,
-) async {
+  List<String> fileNames, {
+  String? sha256,
+}) async {
   if (bundleDir.existsSync()) {
     await bundleDir.delete(recursive: true);
   }
   await bundleDir.create(recursive: true);
   for (final name in fileNames) {
     await File(path.join(bundleDir.path, name)).writeAsString('fake-$name');
+  }
+  if (sha256 != null) {
+    await File(
+      path.join(bundleDir.path, '.llamadart_litert_lm.sha256'),
+    ).writeAsString('$sha256\n');
   }
 }

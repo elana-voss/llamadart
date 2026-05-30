@@ -11,6 +11,7 @@ A Flutter chat application demonstrating real-world usage of llamadart with UI.
 - 📱 Material Design 3 UI
 - ⚙️ Model configuration (path, runtime-detected backend selection, GPU layers, context size)
 - 🧩 Capability badges per model (Tools / Thinking / Vision / Audio / Video)
+- 🧪 GGUF and LiteRT-LM model routing through the same high-level engine APIs
 - 🎯 Per-model presets for temperature, Top-K, Top-P, context, and max tokens
 - 🛠️ Tool-calling toggles with template support checks
 - 💾 Settings persistence
@@ -58,11 +59,21 @@ flutter test --run-skipped -t local-only \
      `llama.cpp` mtmd path used here, that projector exposes vision support but
      not audio support, so the chat UI keeps image input enabled and audio input
      disabled for this model.
+   - LiteRT-LM `.litertlm` presets, when present, use the same model library
+     flow. Native builds load cached local bundle paths through the
+     `litert-lm-native` runtime. Web builds load web-compatible `.litertlm`
+     URLs through `@litert-lm/core`; `web/index.html` sets a default module URL
+     that apps can override with `window.__llamadartLiteRtLmModuleUrl`.
+   - The Gemma 4 E2B LiteRT-LM preset uses the native `.litertlm` bundle on
+     Android/iOS/macOS/Linux/Windows and the `-web.litertlm` bundle on Flutter
+     Web.
 
 ### 3. Advanced Configuration (Optional)
 1. Tap the settings icon (⚙️) in the app bar.
 2. Adjust **GPU Layers**, **Context Size**, **Preferred Backend**, **Dart Log Level**, and **Native Log Level**.
-   - Backend choices are concrete runtime-detected options (for example: CPU/Vulkan/CUDA), not `Auto`.
+   - Backend choices are concrete runtime-detected options (for example:
+     CPU/Vulkan/CUDA for GGUF, or CPU/GPU/NPU where LiteRT-LM exposes them), not
+     `Auto`.
 3. Optionally enable **Function Calling** and edit tool declarations depending on model/template support.
 4. Tap **Load Model** to apply changes.
 
@@ -210,6 +221,10 @@ _(Add screenshots here when complete)_
 - Ensure hardware acceleration is enabled (e.g., Metal on Apple, Vulkan on Android/Linux/Windows).
 - Check if `GPU Layers` is set to a high enough value (default 99 offloads all layers).
 - Use a smaller model or a lighter 4-bit quant when your device is memory-bound.
+- For LiteRT-LM, select CPU/GPU/NPU intentionally in the settings sheet when
+  comparing performance. NPU is Android-only and may fail for a given device,
+  OS, or model bundle; fall back to GPU or CPU when the runtime reports that
+  engine creation is unsupported.
 
 **Multimodal instability or decode crashes (Qwen3.5 VLMs):**
 - Keep Qwen3.5 model defaults unless you are tuning carefully (`0.8B` uses `Context Size` 4096; `2B`/`4B`/`9B` use 8192; all ship with `Max Tokens` 1024).
@@ -336,6 +351,13 @@ _(Add screenshots here when complete)_
 - For autonomous browser smoke tests without downloading a real model, append
   `?llamadart_mock_bridge=echo` (or `qwen-weird`) and use
   `tool/testing/playwright_chat_app_mock_smoke.py` against a local static server.
+- For the real Gemma 4 LiteRT-LM web path, use
+  `dart run tool/testing/run_local_e2e.dart --scenario chat-app-web-litert-gemma4-smoke`.
+  This builds the Flutter web app, serves it with COOP/COEP headers, loads the
+  `gemma-4-E2B-it-web.litertlm` bundle through `@litert-lm/core`, and captures
+  streamed single-turn LiteRT-LM text output in Playwright. LiteRT-LM web does
+  not yet preserve chat history, system prompts, or tool declarations through
+  `@litert-lm/core`.
 - Runtime status chips expose execution mode/core/cache/worker fallback/runtime notes,
   so non-COI or worker fallback perf constraints are visible in-app.
 - On web, multimodal projector loading is eager by default for stability: if an

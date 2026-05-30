@@ -3,10 +3,10 @@ import '../core/models/inference/generation_params.dart';
 import '../core/models/chat/content_part.dart';
 import '../core/models/config/log_level.dart';
 
-import 'llama_cpp/llama_cpp_backend.dart'
+import 'native/native_backend.dart'
     if (dart.library.js_interop) 'web/web_backend.dart';
 
-/// Platform-agnostic interface for Llama model inference.
+/// Platform-agnostic interface for local model inference.
 abstract class LlamaBackend {
   /// Factory to create the appropriate backend for the current platform.
   factory LlamaBackend() => createBackend();
@@ -73,7 +73,7 @@ abstract class LlamaBackend {
   /// Removes all active LoRA adapters from the current context.
   Future<void> clearLoraAdapters(int contextHandle);
 
-  /// Returns the name of the active GPU backend.
+  /// Returns the name of the active runtime backend.
   Future<String> getBackendName();
 
   /// Whether this backend supports loading from URLs directly (e.g. WASM).
@@ -91,7 +91,6 @@ abstract class LlamaBackend {
   /// Releases all allocated backend resources.
   Future<void> dispose();
 
-  // NEW: Multimodal context methods
   /// Loads a multimodal projector for vision/audio support.
   Future<int?> multimodalContextCreate(int modelHandle, String mmProjPath);
 
@@ -125,6 +124,16 @@ abstract class LlamaBackend {
 abstract class BackendAvailability {
   /// Returns backend options available for user selection.
   Future<String> getAvailableBackends();
+}
+
+/// Optional backend capability for reporting grammar-constrained decoding.
+///
+/// Backends that do not support llama.cpp-style GBNF grammar constraints can
+/// implement this so high-level chat rendering keeps prompt/parser behavior
+/// while avoiding unsupported grammar parameters.
+abstract class BackendGrammarConstraintsSupport {
+  /// Whether [GenerationParams.grammar] and related grammar fields are supported.
+  bool get supportsGrammarConstraints;
 }
 
 /// Optional backend capability for exposing resolved runtime diagnostics.
@@ -191,6 +200,18 @@ abstract class BackendEmbeddings {
     String text, {
     bool normalize = true,
   });
+}
+
+/// Optional backend capability for reporting whether [BackendEmbeddings] is
+/// actually available for the active runtime.
+///
+/// This is useful for delegating/router backends where the wrapper may expose
+/// embedding methods but support depends on the selected concrete backend.
+/// Backends that do not implement this interface fall back to the structural
+/// `is BackendEmbeddings` check used by older versions.
+abstract class BackendEmbeddingsSupport {
+  /// Whether embedding calls are expected to be supported by this backend.
+  bool get supportsEmbeddings;
 }
 
 /// Optional backend capability for batching embedding requests.

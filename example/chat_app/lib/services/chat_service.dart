@@ -85,6 +85,11 @@ class ChatService {
         await _engine.loadModel(settings.modelPath!, modelParams: modelParams);
       }
 
+      if (_isLiteRtLmModel(settings.modelPath)) {
+        emitProgress(0.92);
+        await _warmUpLiteRtLmRuntime(settings);
+      }
+
       emitProgress(1.0);
     } finally {
       syntheticProgressTimer?.cancel();
@@ -103,9 +108,68 @@ class ChatService {
         normalized.contains('qwen_qwen3.5-0.8b');
   }
 
+  bool _isLiteRtLmModel(String? modelPath) {
+    final normalized = (modelPath ?? '')
+        .split('?')
+        .first
+        .split('#')
+        .first
+        .toLowerCase();
+    return normalized.endsWith('.litertlm');
+  }
+
+  Future<void> _warmUpLiteRtLmRuntime(ChatSettings settings) async {
+    final maxTokens = settings.maxTokens > 0 ? settings.maxTokens : 1;
+    final completed = Completer<void>();
+    late final StreamSubscription<LlamaCompletionChunk> subscription;
+
+    subscription = _engine
+        .create(
+          [
+            LlamaChatMessage.fromText(
+              role: LlamaChatRole.user,
+              text: 'Warm up the runtime.',
+            ),
+          ],
+          params: GenerationParams(
+            maxTokens: maxTokens,
+            temp: settings.temperature,
+            topK: settings.topK,
+            topP: settings.topP,
+            seed: 1,
+          ),
+          enableThinking: false,
+        )
+        .listen(
+          (_) {
+            if (!completed.isCompleted) {
+              completed.complete();
+            }
+          },
+          onError: (Object error, StackTrace stackTrace) {
+            if (!completed.isCompleted) {
+              completed.completeError(error, stackTrace);
+            }
+          },
+          onDone: () {
+            if (!completed.isCompleted) {
+              completed.complete();
+            }
+          },
+        );
+
+    try {
+      await completed.future.timeout(const Duration(minutes: 3));
+    } finally {
+      await subscription.cancel();
+      _engine.cancelGeneration();
+    }
+  }
+
   ModelParams _buildModelParams(ChatSettings settings) {
     final isAndroidNative =
         !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final isLiteRtLm = _isLiteRtLmModel(settings.modelPath);
     final usesGpuBackend = settings.preferredBackend != GpuBackend.cpu;
     final usesVulkanBackend =
         settings.preferredBackend == GpuBackend.vulkan ||
@@ -114,6 +178,17 @@ class ChatService {
         ? settings.contextSize
         : 4096;
     final isQwen35Small = _isQwen35SmallModel(settings.modelPath);
+
+    if (isLiteRtLm) {
+      final liteRtLmGpuLayers = settings.preferredBackend == GpuBackend.cpu
+          ? 0
+          : ModelParams.maxGpuLayers;
+      return ModelParams(
+        gpuLayers: liteRtLmGpuLayers,
+        preferredBackend: settings.preferredBackend,
+        contextSize: settings.contextSize,
+      );
+    }
 
     int resolvedThreads = settings.numberOfThreads;
     int resolvedThreadsBatch = settings.numberOfThreadsBatch;

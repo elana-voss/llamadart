@@ -1,7 +1,8 @@
-/// High-performance Dart and Flutter plugin for llama.cpp.
+/// High-performance Dart and Flutter plugin for local LLM inference.
 ///
-/// **llamadart** allows you to run Large Language Models (LLMs) locally using
-/// GGUF models across all major platforms (Android, iOS, macOS, Linux, Windows, Web).
+/// **llamadart** allows you to run Large Language Models (LLMs) locally with
+/// GGUF models through llama.cpp and `.litertlm` bundles through LiteRT-LM
+/// across native and web platforms.
 ///
 /// ### Core Components
 ///
@@ -15,7 +16,7 @@
 ///
 /// ```dart
 /// final engine = LlamaEngine(LlamaBackend());
-/// await engine.loadModel('path/to/model.gguf');
+/// await engine.loadModel('path/to/model.gguf'); // or model.litertlm
 ///
 /// final session = ChatSession(engine);
 /// await for (final token in session.create([LlamaTextContent('Hello!')])) {
@@ -41,10 +42,12 @@ export 'src/backends/backend.dart'
     show
         LlamaBackend,
         BackendAvailability,
+        BackendGrammarConstraintsSupport,
         BackendRuntimeDiagnostics,
         BackendPerfContextData,
         BackendPerformanceDiagnostics,
         BackendEmbeddings,
+        BackendEmbeddingsSupport,
         BackendBatchEmbeddings,
         BackendStatePersistence,
         BackendStatePersistenceSupport,
@@ -84,6 +87,19 @@ export 'src/core/models/config/lora_config.dart';
 
 // Utils
 export 'src/core/exceptions.dart';
+
+// LiteRT-LM native APIs
+export 'src/backends/litert_lm/litert_lm_backend_stub.dart'
+    if (dart.library.js_interop) 'src/backends/litert_lm/litert_lm_backend_web.dart'
+    if (dart.library.io) 'src/backends/litert_lm/litert_lm_backend.dart'
+    show LiteRtLmBackend;
+export 'src/backends/litert_lm/litert_lm_runtime_stub.dart'
+    if (dart.library.io) 'src/backends/litert_lm/litert_lm_runtime.dart'
+    show LiteRtLmRuntimeClient, LiteRtLmRuntimeMetrics, LiteRtLmRuntimeResult;
+
+// Deprecated compatibility aliases for the old benchmark API.
+export 'src/experimental/litert_lm/litert_lm_benchmark_stub.dart'
+    if (dart.library.io) 'src/experimental/litert_lm/litert_lm_benchmark.dart';
 
 // Bindings - conditional export for web/native
 export 'src/backends/llama_cpp/bindings.dart'

@@ -110,7 +110,11 @@ class MockLlamaEngine extends LlamaEngine {
   bool mmprojLoaded = false;
   int loadMultimodalProjectorCalls = 0;
   int unloadMultimodalProjectorCalls = 0;
+  int createCalls = 0;
   ModelParams? lastModelParams;
+  GenerationParams? lastCreateParams;
+  BackendPerfContextData? performanceContext;
+  List<String> createChunkContents = const ['Hi there'];
   String? lastLoadedModelPath;
   String? lastLoadedModelUrl;
 
@@ -195,18 +199,22 @@ class MockLlamaEngine extends LlamaEngine {
     Map<String, dynamic>? chatTemplateKwargs,
     DateTime? templateNow,
   }) async* {
-    yield LlamaCompletionChunk(
-      id: "mock-id",
-      object: "chat.completion.chunk",
-      created: 1234567890,
-      model: "mock-model",
-      choices: [
-        LlamaCompletionChunkChoice(
-          index: 0,
-          delta: LlamaCompletionChunkDelta(content: "Hi there"),
-        ),
-      ],
-    );
+    createCalls += 1;
+    lastCreateParams = params;
+    for (final content in createChunkContents) {
+      yield LlamaCompletionChunk(
+        id: "mock-id",
+        object: "chat.completion.chunk",
+        created: 1234567890,
+        model: "mock-model",
+        choices: [
+          LlamaCompletionChunkChoice(
+            index: 0,
+            delta: LlamaCompletionChunkDelta(content: content),
+          ),
+        ],
+      );
+    }
   }
 
   @override
@@ -214,6 +222,10 @@ class MockLlamaEngine extends LlamaEngine {
 
   @override
   Future<int> getTokenCount(String text) async => 5;
+
+  @override
+  Future<BackendPerfContextData?> getPerformanceContext() async =>
+      performanceContext;
 }
 
 class MockSettingsService implements SettingsService {

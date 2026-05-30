@@ -1,6 +1,6 @@
 ---
 title: Quickstart
-description: Load a GGUF model, generate tokens, and try embeddings with the core llamadart APIs in minutes.
+description: Load a GGUF or LiteRT-LM model, generate tokens, and try embeddings with the core llamadart APIs in minutes.
 ---
 
 This quickstart uses the core `LlamaEngine` API.
@@ -26,6 +26,26 @@ Future<void> main() async {
   }
 }
 ```
+
+LiteRT-LM `.litertlm` bundles load through the same engine. Native targets load
+local bundle paths, including paths resolved by `loadModelSource(...)`; web
+targets load web-compatible `.litertlm` URLs through the `@litert-lm/core`
+JavaScript runtime.
+
+```dart
+await engine.loadModel(
+  'path/to/gemma-4-E2B-it.litertlm',
+  modelParams: const ModelParams(
+    liteRtLmBackend: LiteRtLmBackendPreference.gpu,
+  ),
+);
+```
+
+`LiteRtLmBackendPreference.auto` is the default. It chooses GPU on Android,
+macOS, and web, and CPU on other current LiteRT-LM targets. Android native
+callers can request `LiteRtLmBackendPreference.npu` for devices and model
+bundles that support the LiteRT-LM NPU delegate. Web rejects NPU selection
+explicitly.
 
 ## Stateless chat completions
 
@@ -60,9 +80,14 @@ print('single dims=${single.length}');
 print('batch size=${batch.length}');
 ```
 
+Embeddings are a llama.cpp/GGUF capability in the current package. Check
+`engine.supportsEmbeddings` before calling these APIs when your app can switch
+between GGUF and LiteRT-LM models.
+
 ## Next steps
 
 - Use [First Chat Session](./first-chat-session) for automatic history.
+- Choose a runtime with [Choosing llama.cpp or LiteRT-LM](../guides/backend-selection).
 - Build retrieval flows with [Embeddings](../guides/embeddings).
 - Tune [Runtime Parameters](../configuration/runtime-parameters).
 - Add tools with [Tool Calling](../guides/tool-calling).
