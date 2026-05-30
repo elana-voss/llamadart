@@ -1,5 +1,19 @@
 ## Unreleased
 
+* **Minor correctness cleanups**:
+  * `ChatSession` no longer throws on an empty-choices completion chunk
+    (e.g. a keep-alive); such chunks are forwarded as-is.
+  * Thinking extraction now strips multiple `<think>` blocks instead of leaking
+    the second and later blocks into user-visible content.
+  * `LlamaEngine.generate` wraps unexpected backend errors in
+    `LlamaInferenceException` so callers catching `LlamaException` see the
+    documented error type.
+  * Fallback tool-call ids are derived from the tool call's logical index
+    rather than its list position.
+  * Loose tool-call parsing tolerates a language token without a trailing
+    delimiter in code fences, and keeps commas inside quoted argument values.
+  * Array grammar generation validates `minItems`/`maxItems` bounds and bounds
+    download restart recursion.
 * **Web large-model (mem64) support**:
   * Added `ModelParams.preferMemory64` and `ModelParams.modelBytesHint`
     (web/WebGPU only; ignored on native) so large GGUF models such as Gemma 4
