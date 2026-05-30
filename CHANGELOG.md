@@ -4,127 +4,48 @@
   * Added `hooks.user_defines.llamadart.llamadart_native_tag`,
     `llamadart_native_repository`, and `llamadart_native_path` so apps can test
     a different compatible native runtime source without patching `llamadart`.
-  * Documented where to find available native release tags and how to confirm a
-    release includes the target bundle asset before overriding the default.
-  * Documented and logged that native source overrides do not regenerate Dart
-    FFI bindings or symbol lookups, so binaries must stay compatible with the
-    default native runtime revision.
   * Updated the Windows runtime fallback scanner to discover custom GitHub and
     local archive cache namespaces when `.dart_tool/lib` is unavailable.
-* **LiteRT-LM backend selection**:
-  * Added `ModelParams.liteRtLmBackend` so `.litertlm` callers using the
-    high-level `LlamaBackend()` router can explicitly select LiteRT-LM CPU,
-    GPU, or Android NPU execution. The default remains automatic, choosing GPU
-    on Android/macOS and CPU on other current LiteRT-LM targets.
-  * Aligned LiteRT-LM backend diagnostics with the same platform default before
-    a model is loaded, so direct `LiteRtLmBackend` callers see CPU/GPU status
-    that matches load-time routing.
-  * Added coverage and docs for loading cached Hugging Face `.litertlm` bundles
-    through `loadModelSource(...)`, preserving `liteRtLmBackend` routing after
-    the download/cache manager resolves the local file.
-  * Rejected unsupported llama.cpp-only `ModelParams` for `.litertlm` loads
-    instead of silently ignoring them, while honoring `gpuLayers: 0` as a CPU
-    hint and `chatTemplate` as the LiteRT-LM chat-template override.
-  * Rejected unsupported llama.cpp-only `GenerationParams` for `.litertlm`
-    generation instead of silently ignoring Min-P, repeat-penalty overrides,
-    grammar/lazy grammar triggers, preserved tokens, or custom grammar roots.
-  * Kept high-level native `.litertlm` thinking and tool-call parsing active
-    while skipping template-generated GBNF grammar parameters for LiteRT-LM
-    backends, so tool-capable templates do not fail before generation.
-  * Documented LiteRT-LM web as single-turn text generation until
-    `@litert-lm/core` structured chat/tool forwarding is wired through
-    llamadart.
-  * Matched LiteRT-LM bundle validation to native router behavior so uppercase
-    `.LITERTLM` local paths are accepted after format routing selects LiteRT-LM.
-  * Added explicit false capability reporting for direct `LiteRtLmBackend`
-    embeddings and state-persistence support.
-  * Reported LiteRT-LM state-persistence unsupported errors with LiteRT-LM
-    guidance instead of WebGPU bridge guidance.
-  * Report direct `LiteRtLmBackend(preferredBackend: ...)` CPU/GPU/NPU
-    diagnostics before model load, including platform availability errors.
-  * Preserved pre-load `LlamaBackend()` native diagnostics by probing through a
-    llama.cpp delegate without selecting the final model-format backend.
-  * Issued fresh LiteRT-LM model and context handles on reload so stale
-    direct-backend handles cannot accidentally alias the active model.
-  * Wired LiteRT-LM native tokenization, detokenization, and log-level control
-    through the worker isolate so high-level token counts and chat-session
-    history pruning no longer need fallback estimates for `.litertlm` bundles.
-  * Rejected LiteRT-LM detokenization requests that ask to include special
-    tokens instead of silently ignoring the llama.cpp-only flag.
-  * Rejected all LiteRT-LM multimodal backend operations consistently instead
-    of allowing no-op projector frees or false capability probes.
-  * Rejected multimodal content passed to direct LiteRT-LM chat-template
-    application instead of stringifying image/audio maps into text prompts.
-  * Routed direct LiteRT-LM chat-template application through the Dart template
-    engine so backend-level template calls work consistently with the
-    high-level `.litertlm` engine path.
-  * Promoted the LiteRT-LM runtime client, result, and metrics types out of the
-    experimental benchmark namespace while keeping deprecated benchmark
-    wrappers for compatibility.
-  * Hardened direct `LiteRtLmRuntimeClient` lifecycle handling with validation
-    for impossible token/run counts and safer native handle cleanup on
-    initialization or streaming failures.
-  * Cleared disposed LiteRT-LM service runtime clients when replacement
-    initialization fails so later tokenization or generation retries start from a
-    clean runtime client.
-  * Fixed macOS LiteRT-LM extracted-runtime cache discovery to use the current
-    runtime ABI, so Intel macOS looks for `macos/x64` bundles instead of the
-    arm64 cache layout.
-  * Validate macOS LiteRT-LM cache and app framework directories before
-    selecting them so partial runtime installs cannot hide missing
-    `StreamProxy` or companion dylib failures until model load.
-  * Fixed iOS LiteRT-LM loading to prefer the bundled native asset identifiers
-    for `LiteRtLm` and `StreamProxy` before falling back to bare dylib names.
-  * Kept the web-safe `LiteRtLmBackend` placeholder constructor aligned with
-    the native constructor so cross-platform code still compiles before failing
-    with the expected native-only unsupported error.
-  * Added target-specific Pixel benchmark timeouts so full Gemma 4 comparisons
-    can allow the slower llama.cpp/GGUF Vulkan leg to finish without hiding
-    LiteRT-LM failures behind an unnecessarily long timeout.
-  * Updated the LiteRT-LM benchmark app so the llama.cpp/GGUF comparison leg
-    defaults to Metal on Apple platforms and Vulkan on Android/Linux/Windows,
-    with `LLAMADART_BACKEND` forwarded by the Pixel benchmark script for
-    explicit benchmark overrides.
-  * Coalesced concurrent LiteRT-LM worker startup requests so simultaneous
-    pre-load diagnostics cannot leak extra backend isolates.
-  * Reject concurrent LiteRT-LM generations before sending them to the worker so
-    the active generation cleanup hook cannot be overwritten by a second stream.
-  * Cancel and close active LiteRT-LM generation streams before direct backend
-    reload, context free, or model free requests so teardown cannot leave callers
-    waiting on a stale stream.
-  * Dispose LiteRT-LM runtime clients and clear context-scoped performance
-    metrics when a context is freed or replaced, matching llama.cpp context
-    teardown semantics more closely.
-  * Dispose any pre-context LiteRT-LM runtime client when a context is created
-    so tokenization before context creation cannot leave generation using stale
-    native context settings.
-  * Treat LiteRT-LM generation requests with `maxTokens <= 0` as no-ops instead
-    of inflating them to the default output-token budget.
-  * Report backend/model-specific LiteRT-LM engine creation failures and make
-    Pixel benchmark runs fail when the app logs `BENCHMARK: ERROR`.
-  * Normalize direct LiteRT-LM backend selectors before native initialization so
-    `cpu`, `gpu`, and `npu` behave consistently across runtime, service, and
-    direct-backend APIs.
-  * Reject explicit LiteRT-LM backend changes and unsupported llama.cpp-only
-    context-time `ModelParams` during context creation instead of silently
-    keeping the model-load backend or ignoring unsupported context parameters.
-  * Updated website platform/lifecycle docs to cover `.litertlm` routing,
-    `litert-lm-native` runtime bundles, and the current LiteRT-LM capability
-    limits.
-  * Reject non-positive LiteRT-LM `contextSize` values during model load so
-    callers get a clear load-time error instead of a later native initialization
-    failure.
-  * Prevent immediate LiteRT-LM stream cancellation from sending a stale
-    generation request after the caller's response port has already closed.
-  * Serialized regular LiteRT-LM worker requests through one service queue while
-    keeping cancellation responsive, preventing overlapping async access to the
-    worker-owned native runtime state.
-  * Validate the full platform-specific LiteRT-LM companion runtime library set
-    during native-asset setup so incomplete native bundles are refreshed or fail
-    at build time instead of surfacing missing-library errors at model load.
-  * Matched coverage handling for the LiteRT-LM native FFI runtime boundary to
-    real-library smoke coverage while keeping public runtime value types covered
-    by unit tests.
+* **LiteRT-LM model support**:
+  * Added `.litertlm` routing through `LlamaBackend()` on native and web targets,
+    including native bundle downloads from `leehack/litert-lm-native` and web
+    loading through `@litert-lm/core`.
+  * Added `ModelParams.liteRtLmBackend` so callers can select LiteRT-LM CPU,
+    GPU, or Android NPU execution where supported; `auto` chooses GPU on
+    Android/macOS and CPU elsewhere on native targets.
+  * Added cached Hugging Face `.litertlm` loading through
+    `loadModelSource(...)`, preserving the selected LiteRT-LM backend after the
+    download/cache manager resolves the local file.
+  * Added native LiteRT-LM tokenization, detokenization, log-level control,
+    runtime metrics, and high-level `ChatSession` token counting support.
+  * Kept high-level native thinking and tool-call parsing active for compatible
+    templates while documenting LiteRT-LM web as single-turn text generation
+    until structured chat/tool forwarding is exposed by `@litert-lm/core`.
+* **Validation and capability reporting**:
+  * Reject unsupported llama.cpp-only `ModelParams` and `GenerationParams` for
+    `.litertlm` loads/generation instead of silently ignoring them.
+  * Report LiteRT-LM embeddings, state persistence, LoRA, grammar constraints,
+    multimodal, and web tokenizer limitations explicitly through capability
+    probes and unsupported-operation errors.
+  * Validate platform-specific LiteRT-LM companion libraries during native-asset
+    setup so incomplete runtime bundles fail at build time rather than model
+    load.
+* **Lifecycle and diagnostics**:
+  * Hardened LiteRT-LM worker startup, cancellation, reload, context teardown,
+    runtime-client cleanup, stale-handle invalidation, and concurrent generation
+    handling.
+  * Improved direct `LiteRtLmBackend` diagnostics before model load, including
+    selected CPU/GPU/NPU backend reporting and platform availability errors.
+  * Fixed macOS LiteRT-LM cache/framework discovery for arm64 and x64 layouts
+    and iOS loading of bundled `LiteRtLm` / `StreamProxy` native asset
+    identifiers.
+* **Benchmarks and docs**:
+  * Added fair Gemma 4 LiteRT-LM versus llama.cpp/GGUF benchmark tooling for
+    Android, macOS, and web, including Pixel benchmark failure detection and
+    target-specific timeouts.
+  * Updated README and website docs for backend selection, platform/runtime
+    support, package-size controls, benchmark results, and current LiteRT-LM
+    capability limits.
 * **Compatibility note**: no public API breaking changes for existing GGUF /
   llama.cpp callers. LiteRT-LM support is additive, with deprecated benchmark
   wrappers retained for compatibility; unsupported llama.cpp-only parameters are

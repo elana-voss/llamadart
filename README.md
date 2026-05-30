@@ -308,14 +308,14 @@ persist chat messages separately when using the high-level chat API.
 
 ## ✅ Platform Defaults and Configurability
 
-| Target | Default runtime backends | Configurable in `pubspec.yaml` |
-|--------|--------------------------|---------------------------------|
+| Target | Bundled llama.cpp runtime modules | Configurable in `pubspec.yaml` |
+|--------|-----------------------------------|---------------------------------|
 | android-arm64 / android-x64 | cpu, vulkan | yes |
 | linux-arm64 / linux-x64 | cpu, vulkan | yes |
 | windows-arm64 / windows-x64 | cpu, vulkan | yes |
-| macos-arm64 / macos-x86_64 | cpu, METAL | no |
-| ios-arm64 / ios simulators | cpu, METAL | no |
-| web | webgpu, cpu (bridge router); LiteRT-LM JS for `.litertlm` URLs | n/a |
+| macos-arm64 / macos-x86_64 | consolidated cpu + Metal runtime | no |
+| ios-arm64 / ios simulators | consolidated cpu + Metal runtime | no |
+| web | WebGPU/CPU bridge router for GGUF; LiteRT-LM JS for `.litertlm` URLs | n/a |
 
 `.gguf` models use the llama.cpp runtime matrix above. Native `.litertlm`
 models use the LiteRT-LM runtime bundles from `litert-lm-native`; the current
@@ -356,7 +356,7 @@ rejected until LiteRT-LM exposes equivalent runtime controls.
 <details>
 <summary>Full module matrix (available modules by target)</summary>
 
-Backend module matrix from the default native tag `b9371`:
+Available llama.cpp module matrix from the default native tag `b9371`:
 
 | Target | Available backend modules in bundle |
 |--------|-------------------------------------|
@@ -374,14 +374,13 @@ Backend module matrix from the default native tag `b9371`:
 
 </details>
 
-Recognized backend names for `llamadart_native_backends`:
+Recognized split-module names for `llamadart_native_backends`:
 
 - `vulkan`
 - `cpu`
 - `opencl`
 - `cuda`
 - `blas`
-- `metal`
 - `hip`
 
 Accepted aliases:
@@ -389,6 +388,11 @@ Accepted aliases:
 - `vk` -> `vulkan`
 - `ocl` -> `opencl`
 - `open-cl` -> `opencl`
+
+`llamadart_native_backends` only filters split llama.cpp modules on configurable
+Android, Linux, and Windows bundles. Apple Metal is selected at runtime through
+`GpuBackend.metal` or `ModelParams.preferredBackend`; it is not a build-hook
+module selector.
 
 Android arm64 CPU profile options (`platforms.android-arm64`):
 
