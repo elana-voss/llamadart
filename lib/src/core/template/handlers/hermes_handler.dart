@@ -46,6 +46,7 @@ class HermesHandler extends ChatTemplateHandler {
         'messages': templateMessages(messages),
         'add_generation_prompt': addAssistant,
         'tools': tools?.map((t) => t.toJson()).toList(),
+        'enable_thinking': enableThinking,
         'bos_token': metadata['tokenizer.ggml.bos_token'] ?? '<s>',
         'eos_token': metadata['tokenizer.ggml.eos_token'] ?? '</s>',
       },
@@ -97,6 +98,16 @@ class HermesHandler extends ChatTemplateHandler {
         content: text.trim(),
         reasoningContent: thinking.reasoning,
       );
+    }
+
+    if (isPartial) {
+      final visiblePrefix = _contentBeforePendingToolEnvelope(text);
+      if (visiblePrefix != null) {
+        return ChatParseResult(
+          content: visiblePrefix.trim(),
+          reasoningContent: thinking.reasoning,
+        );
+      }
     }
 
     final toolCalls = <LlamaCompletionChunkToolCall>[];
@@ -201,7 +212,14 @@ class HermesHandler extends ChatTemplateHandler {
       }
     }
 
-    if (parseFailed && !isPartial) {
+    if (parseFailed) {
+      if (isPartial) {
+        return ChatParseResult(
+          content: content.toString().trim(),
+          reasoningContent: thinking.reasoning,
+          toolCalls: toolCalls,
+        );
+      }
       return ChatParseResult(
         content: text.trim(),
         reasoningContent: thinking.reasoning,
@@ -252,6 +270,42 @@ class HermesHandler extends ChatTemplateHandler {
       return null;
     }
     return matches.first;
+  }
+
+  String? _contentBeforePendingToolEnvelope(String text) {
+    final lower = text.toLowerCase();
+    const markers = <String>[
+      '<tool_call',
+      '<function_call',
+      '<function=',
+      '<function name=',
+    ];
+
+    var markerStart = -1;
+    for (final marker in markers) {
+      final index = lower.indexOf(marker);
+      if (index >= 0 && (markerStart == -1 || index < markerStart)) {
+        markerStart = index;
+      }
+    }
+    if (markerStart < 0) {
+      return null;
+    }
+
+    final afterMarker = text.substring(markerStart);
+    final completeXmlToolCall = RegExp(
+      r'<tool_call>[\s\S]*?</tool_call>',
+      caseSensitive: false,
+    ).hasMatch(afterMarker);
+    final completeFunctionCall = RegExp(
+      r'<function(?:=[^>]+| name="[^"]+")>[\s\S]*?</function>',
+      caseSensitive: false,
+    ).hasMatch(afterMarker);
+    if (completeXmlToolCall || completeFunctionCall) {
+      return null;
+    }
+
+    return text.substring(0, markerStart);
   }
 
   ParsedJsonValueSlice? _extractJsonObjectRange(String text, int start) {

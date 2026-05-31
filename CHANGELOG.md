@@ -1,5 +1,37 @@
 ## Unreleased
 
+* **LiteRT-LM Gemma 4 function calling + thinking fix**:
+  * Fixed Gemma 4 `.litertlm` models not calling tools and producing unreliable
+    thinking. The backend supplied a hand-written stub chat template that
+    omitted the tool-declaration block entirely and inverted the thinking
+    control structure; it is replaced with the full canonical Gemma 4 template
+    (the one llama.cpp reads from the GGUF), minus the leading `bos_token` since
+    the native runtime adds the start token itself.
+  * Fixed Gemma 4 thinking never surfacing (and raw JSON leaking into the reply)
+    on native LiteRT-LM. The runtime streams reasoning on a separate channel
+    (`{"role":"assistant","channels":{"thought":"..."}}`) and the answer as
+    `content`; the response parser only understood `content`, so thought chunks
+    leaked verbatim. Thought runs are now reassembled into the
+    `<|channel>thought ... <channel|>` markers the handler parses as reasoning.
+    Verified on-device with `gemma-4-E2B-it.litertlm` (function calling +
+    thinking) via `tool/litert_lm_chat_features_smoke.dart`.
+  * Introduced a filename-keyed chat-template registry for `.litertlm` bundles
+    (they can't expose their template through the native FFI), seeded with
+    Gemma 4/3/3n and Qwen 2.5/3. Gemma 3/3n previously fell back to ChatML (the
+    wrong format); they now render the correct `<start_of_turn>` format with
+    system folded into the first user turn. Pass `ModelParams.chatTemplate` to
+    override detection for other models. See `doc/litert_lm_templates.md`.
+  * Fixed tool calling throwing on LiteRT-LM for grammar-using handlers (e.g.
+    Qwen/Hermes): `NativeAutoBackend` now forwards `supportsGrammarConstraints`
+    from the active delegate, so the engine skips the template grammar that
+    LiteRT-LM rejects instead of erroring. Verified on-device with
+    `Qwen3-0.6B.litertlm` (thinking + `get_weather` tool call).
+  * Suppressed reasoning deltas when callers pass `enableThinking: false`, even
+    if the LiteRT-LM runtime still emits a thought channel. Structured tool-call
+    streams also no longer leak raw Hermes/Qwen JSON or Gemma `<|tool_call>`
+    markers as assistant content before the final `tool_calls` chunk.
+  * Added `tool/gguf_chat_features_smoke.dart` so the same streaming/parser
+    invariants can be smoke-tested against real Qwen and Gemma GGUF artifacts.
 * **Web LiteRT-LM (`.litertlm`) chat-app fixes**:
   * Fixed a spurious tokenization error bubble shown after every reply on web
     (`Tokenization is not supported by the active backend`). The chat app

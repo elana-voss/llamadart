@@ -52,6 +52,35 @@ void main() {
     expect(parsed.content, equals('tail'));
   });
 
+  test('passes enableThinking into the template context', () {
+    final handler = HermesHandler();
+    const template =
+        '{% if enable_thinking is defined and enable_thinking is false %}'
+        'thinking-off'
+        '{% else %}'
+        'thinking-on'
+        '{% endif %}';
+    const messages = [
+      LlamaChatMessage.fromText(role: LlamaChatRole.user, text: 'hi'),
+    ];
+
+    final disabled = handler.render(
+      templateSource: template,
+      messages: messages,
+      metadata: const {},
+      enableThinking: false,
+    );
+    final enabled = handler.render(
+      templateSource: template,
+      messages: messages,
+      metadata: const {},
+      enableThinking: true,
+    );
+
+    expect(disabled.prompt, 'thinking-off');
+    expect(enabled.prompt, 'thinking-on');
+  });
+
   test('parses tool call with space between tag and JSON', () {
     final handler = HermesHandler();
     final parsed = handler.parse(
@@ -79,6 +108,25 @@ void main() {
       parsed.toolCalls.first.function?.name,
       equals('get_current_weather'),
     );
+    expect(parsed.content, isEmpty);
+  });
+
+  test('keeps partial bare JSON tool calls out of content', () {
+    final handler = HermesHandler();
+    final parsed = handler.parse(
+      '{"name":"get_current_weather",',
+      isPartial: true,
+    );
+
+    expect(parsed.toolCalls, isEmpty);
+    expect(parsed.content, isEmpty);
+  });
+
+  test('keeps partial XML tool-call envelopes out of content', () {
+    final handler = HermesHandler();
+    final parsed = handler.parse('<tool_call>{"na', isPartial: true);
+
+    expect(parsed.toolCalls, isEmpty);
     expect(parsed.content, isEmpty);
   });
 
