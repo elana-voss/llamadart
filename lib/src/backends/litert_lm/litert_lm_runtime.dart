@@ -105,6 +105,52 @@ List<String> liteRtLmIosStreamProxyCandidatesForAbi(Abi abi) {
   };
 }
 
+/// Path to an embedded iOS framework binary
+/// (`<Frameworks>/<name>.framework/<name>`).
+///
+/// iOS frameworks are flat, unlike the versioned macOS layout.
+String liteRtLmIosFrameworkBinaryPath(String frameworksDirPath, String name) {
+  return '$frameworksDirPath/$name.framework/$name';
+}
+
+/// Ordered LiteRT-LM library load candidates for iOS.
+///
+/// `DynamicLibrary.open` does not resolve Dart native-asset ids (only `@Native`
+/// externals do), so the `package:llamadart/...` id is passed verbatim to
+/// dlopen and never loads. When [frameworksDirPath] is known, the absolute path
+/// to the embedded framework binary is preferred; the native-asset id and bare
+/// `libLiteRtLm.dylib` remain as last-resort fallbacks for the error message.
+List<String> liteRtLmIosLibraryCandidates(
+  Abi abi, {
+  String? frameworksDirPath,
+}) {
+  final fallbacks = liteRtLmIosLibraryCandidatesForAbi(abi);
+  if (fallbacks.isEmpty) {
+    return const <String>[];
+  }
+  return <String>[
+    if (frameworksDirPath != null)
+      liteRtLmIosFrameworkBinaryPath(frameworksDirPath, 'LiteRtLm'),
+    ...fallbacks,
+  ];
+}
+
+/// Ordered StreamProxy load candidates for iOS. See [liteRtLmIosLibraryCandidates].
+List<String> liteRtLmIosStreamProxyCandidates(
+  Abi abi, {
+  String? frameworksDirPath,
+}) {
+  final fallbacks = liteRtLmIosStreamProxyCandidatesForAbi(abi);
+  if (fallbacks.isEmpty) {
+    return const <String>[];
+  }
+  return <String>[
+    if (frameworksDirPath != null)
+      liteRtLmIosFrameworkBinaryPath(frameworksDirPath, 'StreamProxy'),
+    ...fallbacks,
+  ];
+}
+
 /// Internal helper used by the LiteRT-LM runtime to validate extracted
 /// native-assets cache directories.
 List<String> liteRtLmRequiredLibrariesForAbi(Abi abi) {
@@ -900,7 +946,10 @@ class LiteRtLmRuntimeClient {
 
     if (libraries.proxyCandidates.isNotEmpty) {
       try {
-        final proxyLibrary = _openFirstAvailable(libraries.proxyCandidates);
+        final proxyLibrary = _openFirstAvailable(
+          libraries.proxyCandidates,
+          description: 'StreamProxy library',
+        );
         final loadGlobal = proxyLibrary
             .lookupFunction<_LoadGlobalNative, _LoadGlobalDart>(
               'stream_proxy_load_global',
@@ -938,7 +987,10 @@ class LiteRtLmRuntimeClient {
       }
     }
 
-    final liteRtLm = _openFirstAvailableWithPath(libraries.liteRtLmCandidates);
+    final liteRtLm = _openFirstAvailableWithPath(
+      libraries.liteRtLmCandidates,
+      description: 'LiteRT-LM library',
+    );
     _liteRtLmLibraryPath = liteRtLm.path;
     _bindings = _LiteRtLmBindings(liteRtLm.library);
   }
@@ -964,9 +1016,21 @@ class LiteRtLmRuntimeClient {
       );
     }
     if (Platform.isIOS && (abi == Abi.iosArm64 || abi == Abi.iosX64)) {
+      // The LiteRT-LM frameworks are embedded under
+      // `<App>.app/Frameworks/<Name>.framework/<Name>`. Resolving their absolute
+      // paths from the executable lets dlopen, the StreamProxy RTLD_GLOBAL
+      // preload, and the isolate re-open all receive a real path (the
+      // `package:` native-asset ids never load via `DynamicLibrary.open`).
+      final frameworksDirPath = _findIosAppFrameworksDir()?.path;
       return (
-        proxyCandidates: liteRtLmIosStreamProxyCandidatesForAbi(abi),
-        liteRtLmCandidates: liteRtLmIosLibraryCandidatesForAbi(abi),
+        proxyCandidates: liteRtLmIosStreamProxyCandidates(
+          abi,
+          frameworksDirPath: frameworksDirPath,
+        ),
+        liteRtLmCandidates: liteRtLmIosLibraryCandidates(
+          abi,
+          frameworksDirPath: frameworksDirPath,
+        ),
         companions: const [],
         directCallbackSupported: true,
       );
@@ -1067,30 +1131,31 @@ class LiteRtLmRuntimeClient {
     return null;
   }
 
-  DynamicLibrary _openFirstAvailable(List<String> candidates) {
-    Object? lastError;
-    for (final candidate in candidates) {
-      try {
-        return DynamicLibrary.open(candidate);
-      } catch (error) {
-        lastError = error;
-      }
-    }
-    throw ArgumentError('Failed to load any of $candidates: $lastError');
+  DynamicLibrary _openFirstAvailable(
+    List<String> candidates, {
+    required String description,
+  }) {
+    return _openFirstAvailableWithPath(
+      candidates,
+      description: description,
+    ).library;
   }
 
   ({String path, DynamicLibrary library}) _openFirstAvailableWithPath(
-    List<String> candidates,
-  ) {
-    Object? lastError;
+    List<String> candidates, {
+    required String description,
+  }) {
+    final errors = <String>[];
     for (final candidate in candidates) {
       try {
         return (path: candidate, library: DynamicLibrary.open(candidate));
       } catch (error) {
-        lastError = error;
+        errors.add('  - $candidate: $error');
       }
     }
-    throw ArgumentError('Failed to load any of $candidates: $lastError');
+    throw ArgumentError(
+      'Failed to load any $description candidate:\n${errors.join('\n')}',
+    );
   }
 
   Directory? _findMacOsAppFrameworksDir() {
@@ -1114,6 +1179,24 @@ class LiteRtLmRuntimeClient {
       return frameworksDir;
     }
     return null;
+  }
+
+  /// Locates the `Frameworks` directory of the running iOS `.app` bundle when
+  /// it contains the embedded LiteRT-LM framework.
+  ///
+  /// iOS frameworks are flat (`<App>.app/Frameworks/<Name>.framework/<Name>`),
+  /// unlike the versioned macOS layout, and the executable lives directly in
+  /// the bundle root (`<App>.app/<Executable>`).
+  Directory? _findIosAppFrameworksDir() {
+    final executable = File(Platform.resolvedExecutable);
+    final frameworksDir = Directory('${executable.parent.path}/Frameworks');
+    if (!frameworksDir.existsSync()) {
+      return null;
+    }
+    final liteRtLm = File(
+      liteRtLmIosFrameworkBinaryPath(frameworksDir.path, 'LiteRtLm'),
+    );
+    return liteRtLm.existsSync() ? frameworksDir : null;
   }
 
   Directory? _findMacOsLiteRtLmCacheDir() {
