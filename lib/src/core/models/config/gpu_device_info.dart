@@ -19,13 +19,14 @@ enum GpuDeviceType {
   unknown,
 }
 
-/// One inference-capable device reported by a GPU backend.
+/// One device reported by the loaded backends (CPU or a GPU).
 ///
-/// [index] is the position within that backend's device list and is the value
-/// to pass as [ModelParams.mainGpu] to pin offload to this device (with
-/// [ModelParams.splitMode] set to none for single-GPU use).
+/// [index] is the position in the backend's full device list (CPU included),
+/// for identification and logging. It is not the `mainGpu` value: `mainGpu`
+/// indexes the offload device list, which excludes the CPU device, so the
+/// caller derives it from a device's position among the non-CPU entries.
 class GpuDeviceInfo {
-  /// Position within the backend's device list (the `mainGpu` value).
+  /// Position in the backend's full device list (CPU included).
   final int index;
 
   /// Human-readable device name reported by the driver.

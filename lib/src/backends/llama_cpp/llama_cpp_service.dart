@@ -56,6 +56,10 @@ typedef _GgmlBackendDevBackendRegDart =
     ggml_backend_reg_t Function(ggml_backend_dev_t);
 typedef _GgmlBackendDevByTypeNative = ggml_backend_dev_t Function(UnsignedInt);
 typedef _GgmlBackendDevByTypeDart = ggml_backend_dev_t Function(int);
+typedef _GgmlBackendDevGetPropsNative =
+    Void Function(ggml_backend_dev_t, Pointer<ggml_backend_dev_props>);
+typedef _GgmlBackendDevGetPropsDart =
+    void Function(ggml_backend_dev_t, Pointer<ggml_backend_dev_props>);
 typedef _LlamaDartSetLogLevelNative = Void Function(Int32);
 typedef _LlamaDartSetLogLevelDart = void Function(int);
 typedef _MtmdDefaultMarkerNative = Pointer<Char> Function();
@@ -211,6 +215,7 @@ class LlamaCppService {
   _GgmlBackendDevNameDart? _ggmlBackendDevNameFallback;
   _GgmlBackendDevBackendRegDart? _ggmlBackendDevBackendRegFallback;
   _GgmlBackendDevByTypeDart? _ggmlBackendDevByTypeFallback;
+  _GgmlBackendDevGetPropsDart? _ggmlBackendDevGetPropsFallback;
   bool _logLevelFallbackLookupAttempted = false;
   String? _logLevelFallbackLookupSearchKey;
   _LlamaDartSetLogLevelDart? _llamaDartSetLogLevelFallback;
@@ -1866,6 +1871,18 @@ class LlamaCppService {
         }
       }
 
+      if (_ggmlBackendDevGetPropsFallback == null) {
+        try {
+          _ggmlBackendDevGetPropsFallback = library
+              .lookupFunction<
+                _GgmlBackendDevGetPropsNative,
+                _GgmlBackendDevGetPropsDart
+              >('ggml_backend_dev_get_props');
+        } catch (_) {
+          // Keep searching other candidates.
+        }
+      }
+
       if (_ggmlBackendLoadFallback != null &&
           _ggmlBackendLoadAllFallback != null &&
           _ggmlBackendLoadAllFromPathFallback != null &&
@@ -1880,7 +1897,8 @@ class LlamaCppService {
           _ggmlBackendDevGetFallback != null &&
           _ggmlBackendDevNameFallback != null &&
           _ggmlBackendDevBackendRegFallback != null &&
-          _ggmlBackendDevByTypeFallback != null) {
+          _ggmlBackendDevByTypeFallback != null &&
+          _ggmlBackendDevGetPropsFallback != null) {
         return;
       }
     }
@@ -2270,6 +2288,23 @@ class LlamaCppService {
     );
   }
 
+  // Void return, so it can't go through _ggmlRegistryFallbackOr (which yields a
+  // value). Mirrors that helper's Windows-prefers-ggml.dll logic by hand.
+  void _ggmlBackendDevGetProps(
+    ggml_backend_dev_t dev,
+    Pointer<ggml_backend_dev_props> props,
+  ) {
+    if (Platform.isWindows) {
+      _resolveGgmlFallbackFunctions();
+      final fallback = _ggmlBackendDevGetPropsFallback;
+      if (fallback != null) {
+        fallback(dev, props);
+        return;
+      }
+    }
+    ggml_backend_dev_get_props(dev, props);
+  }
+
   static String _backendLibraryFileName(String backend) {
     if (Platform.isWindows) {
       return 'ggml-$backend.dll';
@@ -2336,54 +2371,43 @@ class LlamaCppService {
     return ptr;
   }
 
-  /// Enumerates the Vulkan backend's offload devices in list order. The
-  /// returned [GpuDeviceInfo.index] is the value to pass as
-  /// [ModelParams.mainGpu] when loading with the Vulkan backend. On a laptop
-  /// with both an integrated and a discrete GPU, both appear here so the
-  /// caller can pin offload to the discrete one. Returns an empty list when
-  /// the Vulkan backend is unavailable.
+  /// Enumerates every device the loaded backends registered (CPU plus any GPU
+  /// devices), in backend device-list order. [GpuDeviceInfo.index] is the
+  /// position in that full list — useful for logging. To pin offload, the
+  /// caller maps a chosen GPU to `mainGpu` by its position among the non-CPU
+  /// devices (the CPU device is excluded from llama.cpp's offload device
+  /// list). Uses the ggml.dll-aware wrapped lookups so it works with the
+  /// split Windows bundle; returns an empty list only when no backend
+  /// registered any device.
   List<GpuDeviceInfo> listGpuDevices() {
-    final regNamePtr = 'Vulkan'.toNativeUtf8();
+    final count = _ggmlBackendDevCount();
+    if (count <= 0) {
+      return const [];
+    }
+    final propsPtr = malloc<ggml_backend_dev_props>();
     try {
-      final reg = _ggmlBackendRegByName(regNamePtr.cast());
-      if (reg == nullptr) {
-        return const [];
-      }
-      final count = _ggmlBackendRegDevCount(reg);
-      if (count <= 0) {
-        return const [];
-      }
       final result = <GpuDeviceInfo>[];
       for (var i = 0; i < count; i++) {
-        final dev = _ggmlBackendRegDevGet(reg, i);
+        final dev = _ggmlBackendDevGet(i);
         if (dev == nullptr) {
           continue;
         }
-        final namePtr = ggml_backend_dev_name(dev);
-        final name = namePtr == nullptr
-            ? ''
-            : namePtr.cast<Utf8>().toDartString();
-        final freePtr = malloc<Size>();
-        final totalPtr = malloc<Size>();
-        try {
-          ggml_backend_dev_memory(dev, freePtr, totalPtr);
-          result.add(
-            GpuDeviceInfo(
-              index: i,
-              name: name,
-              type: _mapDeviceType(ggml_backend_dev_type$1(dev)),
-              memoryFreeBytes: freePtr.value,
-              memoryTotalBytes: totalPtr.value,
-            ),
-          );
-        } finally {
-          malloc.free(freePtr);
-          malloc.free(totalPtr);
-        }
+        _ggmlBackendDevGetProps(dev, propsPtr);
+        final props = propsPtr.ref;
+        final namePtr = props.name;
+        result.add(
+          GpuDeviceInfo(
+            index: i,
+            name: namePtr == nullptr ? '' : namePtr.cast<Utf8>().toDartString(),
+            type: _mapDeviceType(props.type),
+            memoryFreeBytes: props.memory_free,
+            memoryTotalBytes: props.memory_total,
+          ),
+        );
       }
       return result;
     } finally {
-      malloc.free(regNamePtr);
+      malloc.free(propsPtr);
     }
   }
 
