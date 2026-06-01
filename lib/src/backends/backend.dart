@@ -1,6 +1,7 @@
 import '../core/models/inference/model_params.dart';
 import '../core/models/inference/generation_params.dart';
 import '../core/models/chat/content_part.dart';
+import '../core/models/config/gpu_device_info.dart';
 import '../core/models/config/log_level.dart';
 
 import 'llama_cpp/llama_cpp_backend.dart'
@@ -106,6 +107,11 @@ abstract class LlamaBackend {
 
   /// Returns the total and free VRAM in bytes.
   Future<({int total, int free})> getVramInfo();
+
+  /// Lists the GPU devices available for offload. Each entry's
+  /// [GpuDeviceInfo.index] is the value to pass as [ModelParams.mainGpu] to
+  /// pin offload to that device. Empty when no GPU backend is available.
+  Future<List<GpuDeviceInfo>> listGpuDevices();
 
   /// Applies the model's chat template to the given [messages].
   ///

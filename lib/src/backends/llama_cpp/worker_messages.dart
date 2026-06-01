@@ -1,4 +1,5 @@
 import 'dart:isolate';
+import '../../core/models/config/gpu_device_info.dart';
 import '../../core/models/inference/model_params.dart';
 import '../../core/models/inference/generation_params.dart';
 import '../../core/models/chat/content_part.dart';
@@ -292,6 +293,12 @@ class SystemInfoRequest extends WorkerRequest {
   SystemInfoRequest(super.sendPort);
 }
 
+/// Request to enumerate inference-capable GPU devices.
+class GpuDeviceListRequest extends WorkerRequest {
+  /// Creates a new [GpuDeviceListRequest].
+  GpuDeviceListRequest(super.sendPort);
+}
+
 /// Request to apply a chat template.
 class ChatTemplateRequest extends WorkerRequest {
   /// The handle of the model.
@@ -473,6 +480,15 @@ class SystemInfoResponse {
 
   /// Creates a new [SystemInfoResponse].
   SystemInfoResponse(this.totalVram, this.freeVram);
+}
+
+/// Response listing the enumerated GPU devices.
+class GpuDeviceListResponse {
+  /// The enumerated devices, in backend device-list order.
+  final List<GpuDeviceInfo> devices;
+
+  /// Creates a new [GpuDeviceListResponse].
+  GpuDeviceListResponse(this.devices);
 }
 
 /// Response containing the formatted chat template result.

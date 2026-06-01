@@ -9,6 +9,7 @@ import 'package:web/web.dart';
 
 import '../../core/models/chat/content_part.dart';
 import '../../core/models/config/gpu_backend.dart';
+import '../../core/models/config/gpu_device_info.dart';
 import '../../core/models/config/llama_cpp_param_values.dart';
 import '../../core/models/config/log_level.dart';
 import '../../core/models/inference/generation_params.dart';
@@ -2121,6 +2122,9 @@ class WebGpuLlamaBackend
 
   @override
   Future<({int total, int free})> getVramInfo() async => (total: 0, free: 0);
+
+  @override
+  Future<List<GpuDeviceInfo>> listGpuDevices() async => const [];
 
   @override
   Future<String> applyChatTemplate(

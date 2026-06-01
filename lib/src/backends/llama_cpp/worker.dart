@@ -203,6 +203,11 @@ void llamaWorkerEntry(SendPort initialSendPort) {
             // Placeholder
             message.sendPort.send(SystemInfoResponse(0, 0));
 
+          case GpuDeviceListRequest():
+            message.sendPort.send(
+              GpuDeviceListResponse(service.listGpuDevices()),
+            );
+
           case ChatTemplateRequest():
             message.sendPort.send(
               ErrorResponse("Chat template not implemented in service yet"),

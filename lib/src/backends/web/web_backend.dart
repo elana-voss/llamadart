@@ -1,5 +1,6 @@
 import '../backend.dart';
 import '../../core/models/chat/content_part.dart';
+import '../../core/models/config/gpu_device_info.dart';
 import '../../core/models/config/log_level.dart';
 import '../../core/models/inference/generation_params.dart';
 import '../../core/models/inference/model_params.dart';
@@ -221,6 +222,11 @@ class WebAutoBackend
   @override
   Future<({int total, int free})> getVramInfo() {
     return _delegate.getVramInfo();
+  }
+
+  @override
+  Future<List<GpuDeviceInfo>> listGpuDevices() {
+    return _delegate.listGpuDevices();
   }
 
   @override
