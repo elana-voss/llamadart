@@ -45,8 +45,11 @@ class ModelCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final colorScheme = Theme.of(context).colorScheme;
     const webLargeModelWarningThresholdBytes = 1900 * 1024 * 1024;
+    final isWebLiteRtLmModel = isWeb && _isLiteRtLmModel(model);
+    final canLoadModel = isDownloaded || isWebLiteRtLmModel;
+    final effectiveModelSizeBytes = model.sizeBytesFor(web: isWeb);
     final showWebLargeModelWarning =
-        isWeb && model.sizeBytes >= webLargeModelWarningThresholdBytes;
+        isWeb && effectiveModelSizeBytes >= webLargeModelWarningThresholdBytes;
     final showMobileDownloadGuidance =
         isDownloading &&
         !isWeb &&
@@ -184,7 +187,9 @@ class ModelCard extends StatelessWidget {
                 ),
               ),
               child: Text(
-                'Web warning: very large model. Download can succeed, but browser memory limits may still prevent loading.',
+                isWebLiteRtLmModel
+                    ? 'Web warning: very large LiteRT-LM model. Browser memory limits may still prevent engine initialization.'
+                    : 'Web warning: very large model. Download can succeed, but browser memory limits may still prevent loading.',
                 style: GoogleFonts.outfit(
                   fontSize: 12,
                   height: 1.3,
@@ -404,7 +409,7 @@ class ModelCard extends StatelessWidget {
             const SizedBox(height: 16),
             SizedBox(
               width: double.infinity,
-              child: isDownloaded
+              child: canLoadModel
                   ? FilledButton.icon(
                       onPressed: onSelect,
                       icon: Icon(
@@ -414,7 +419,11 @@ class ModelCard extends StatelessWidget {
                         size: 18,
                       ),
                       label: Text(
-                        isWeb
+                        isWebLiteRtLmModel
+                            ? (isSelected
+                                  ? 'Reload Web Model'
+                                  : 'Load Web Model')
+                            : isWeb
                             ? (isSelected
                                   ? 'Reload Cached Model'
                                   : 'Use Cached Model')
@@ -454,6 +463,10 @@ class ModelCard extends StatelessWidget {
         ],
       ),
     );
+  }
+
+  bool _isLiteRtLmModel(DownloadableModel model) {
+    return model.filenameFor(web: true).toLowerCase().endsWith('.litertlm');
   }
 
   Widget _buildMetaChip(

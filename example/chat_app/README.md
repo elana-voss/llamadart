@@ -64,6 +64,13 @@ flutter test --run-skipped -t local-only \
      `litert-lm-native` runtime. Web builds load web-compatible `.litertlm`
      URLs through `@litert-lm/core`; `web/index.html` sets a default module URL
      that apps can override with `window.__llamadartLiteRtLmModuleUrl`.
+   - LiteRT-LM Web is currently a single-turn text runtime. Because
+     `@litert-lm/core` accepts one prompt string and applies its own chat
+     wrapper internally, the chat app cannot pass structured chat history,
+     tool declarations, tool choice, or thinking-budget/template controls to
+     web `.litertlm` models. The app disables Function Calling and Thinking
+     controls for this runtime; use GGUF/WebGPU or native LiteRT-LM when those
+     structured controls are required.
    - The Gemma 4 E2B LiteRT-LM preset uses the native `.litertlm` bundle on
      Android/iOS/macOS/Linux/Windows and the `-web.litertlm` bundle on Flutter
      Web.
@@ -360,9 +367,10 @@ _(Add screenshots here when complete)_
   `@litert-lm/core`.
 - `.litertlm` web loads do **not** use the browser Cache Storage prefetch (that
   cache is only read back by the llama.cpp/GGUF bridge); `@litert-lm/core`
-  fetches the model URL itself, so the model is downloaded once. Per-message
-  token counts are also not shown for web LiteRT-LM models because the backend
-  exposes no tokenizer API.
+  fetches the model URL itself. Browser HTTP cache may avoid some network
+  transfer, but engine creation still has to initialize the large model and GPU
+  resources on each load. Per-message token counts are also not shown for web
+  LiteRT-LM models because the backend exposes no tokenizer API.
 - Runtime status chips expose execution mode/core/cache/worker fallback/runtime notes,
   so non-COI or worker fallback perf constraints are visible in-app.
 - On web, multimodal projector loading is eager by default for stability: if an
@@ -390,6 +398,24 @@ _(Add screenshots here when complete)_
 - Manual dispatch can override target Space via `space_repo` input and deploy a specific ref via `deploy_ref`.
 - The workflow-generated Space `README.md` already injects required COI headers
   for large-model web runtime support.
+
+### Hugging Face PR preview deployment (CI)
+
+- Workflow: `.github/workflows/chat_app_hf_pr_preview.yml`
+- Triggered for same-repository pull requests that touch the chat app, package
+  sources, or the web bridge asset script.
+- Creates or updates a per-PR static Space named
+  `llamadart-chat-pr-<number>` and comments the preview URL on the PR.
+- Deletes the preview Space when the PR is closed.
+- Required repository secret: `HF_TOKEN` with write/create access to the preview
+  namespace.
+- Optional repository variable: `HF_CHAT_APP_PREVIEW_NAMESPACE`. If omitted,
+  the workflow uses the owner portion of `HF_CHAT_APP_SPACE_REPO`.
+- Fork PRs are skipped so repository secrets are not exposed to untrusted code.
+- The automated PR workflow becomes available after the workflow file exists on
+  the base branch. For a one-off preview before that, manually dispatch
+  `.github/workflows/chat_app_hf_static_deploy.yml` with `space_repo` set to a
+  temporary Space and `deploy_ref` set to the branch or commit to preview.
 
 If deploying outside this workflow, set this frontmatter in Space README (all
 lowercase):
