@@ -172,6 +172,7 @@ class NativeLlamaBackend
     final cancelToken = malloc<Int8>(1);
     cancelToken.value = 0;
     _activeCancelToken = cancelToken;
+    LlamaBackend.markGenerationStarted(this);
 
     var cleanedUp = false;
     void cleanup() {
@@ -180,6 +181,7 @@ class NativeLlamaBackend
       }
       cleanedUp = true;
 
+      LlamaBackend.markGenerationEnded(this);
       rp.close();
       if (!controller.isClosed) {
         unawaited(controller.close());

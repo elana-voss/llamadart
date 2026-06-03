@@ -911,6 +911,11 @@ class LlamaEngine {
     backend.cancelGeneration();
   }
 
+  /// Cancels any in-flight generation across all engines, including ones the
+  /// caller holds no handle to (e.g. an engine owned by a wrapper plugin).
+  static void cancelActiveGenerations() =>
+      LlamaBackend.cancelActiveGenerations();
+
   // ============================================================
   // TOKENIZATION
   // ============================================================

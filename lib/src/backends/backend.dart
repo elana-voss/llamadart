@@ -12,6 +12,27 @@ abstract class LlamaBackend {
   /// Factory to create the appropriate backend for the current platform.
   factory LlamaBackend() => createBackend();
 
+  /// Backends with a generation in flight. Lets a caller that holds no
+  /// backend instance — e.g. an app whose engine is owned by a wrapper
+  /// plugin — stop generation through [cancelActiveGenerations].
+  static final Set<LlamaBackend> _activeGenerations = {};
+
+  /// Cancels every in-flight generation across all backends.
+  static void cancelActiveGenerations() {
+    for (final backend in _activeGenerations.toList()) {
+      backend.cancelGeneration();
+    }
+  }
+
+  /// Joins the in-flight set when a generation starts, so
+  /// [cancelActiveGenerations] can reach this backend.
+  static void markGenerationStarted(LlamaBackend backend) =>
+      _activeGenerations.add(backend);
+
+  /// Leaves the in-flight set when a generation ends.
+  static void markGenerationEnded(LlamaBackend backend) =>
+      _activeGenerations.remove(backend);
+
   /// Whether the backend is currently initialized and ready for inference.
   bool get isReady;
 
