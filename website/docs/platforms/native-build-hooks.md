@@ -51,8 +51,9 @@ GitHub Releases:
 - `leehack/llamadart-native` for llama.cpp / GGUF runtime libraries.
 - `leehack/litert-lm-native` for LiteRT-LM / `.litertlm` runtime libraries.
 
-Native builds include both runtime families by default when the target platform
-has both. Apps that only ship one model format can reduce package size with
+Android native builds include both runtime families by default when available.
+Other native targets default to `llama_cpp` only. Apps can enable LiteRT-LM on
+desktop/iOS, or reduce package size when they only ship one model format, with
 `hooks.user_defines.llamadart.llamadart_native_runtimes`:
 
 ```yaml
@@ -62,7 +63,8 @@ hooks:
       llamadart_native_runtimes: [llama_cpp] # or [litert_lm]
 ```
 
-The value can also be a per-platform map:
+The value can also be a per-OS or exact-target map. Exact target keys override
+OS keys:
 
 ```yaml
 hooks:
@@ -71,12 +73,45 @@ hooks:
       llamadart_native_runtimes:
         runtimes: [llama_cpp, litert_lm]
         platforms:
+          ios: [llama_cpp]
+          macos: [llama_cpp, litert_lm]
           android-arm64: [litert_lm]
           linux-x64: [llama_cpp]
 ```
 
 Use `llamadart_native_backends` separately to filter llama.cpp modules such as
 Vulkan, CUDA, OpenCL, BLAS, and HIP inside the `llama_cpp` runtime family.
+Use `all` or `both` to include every runtime family for a target.
+
+### Apple Swift Package Manager path
+
+Flutter Apple builds use the root `llamadart` package's Swift Package Manager
+manifest to link Apple XCFrameworks published by `leehack/llamadart-native` and
+`leehack/litert-lm-native` instead of hook-managed Apple bundles. On iOS, the
+hook always uses process-symbol lookup and does not emit the legacy Apple bundle
+assets. This avoids the old iOS wrapper path that can produce App Store
+`MinimumOSVersion` mismatches. Flutter macOS builds use the same SPM path
+automatically; standalone Dart macOS runs keep the native-assets fallback for
+compatibility.
+
+The SPM path keeps runtime-family selection, but Apple binary version/source
+customization moves from `hook/build.dart` to
+`darwin/llamadart/Package.swift`. Normal apps consuming `llamadart` from
+pub.dev cannot customize the published package's `Package.swift` in-place, so
+Apple SPM binary version overrides are not part of the supported app-level
+customization surface. A path/git dependency override or fork of `llamadart`
+with different binary target URL/checksum pins is an advanced
+testing/maintenance escape hatch, not a pub.dev consumer configuration. The
+Dart hook cannot rewrite SPM binary target URLs/checksums at build time. Hook
+source customization still applies to non-Apple targets and to standalone Dart
+macOS fallback mode.
+
+`llamadart_native_runtimes` still decides which runtime families the hook
+reports for Apple SPM builds. It does not prune the SwiftPM binary target
+dependencies from the linked Apple package. Physically pruning the Apple SPM
+product requires maintaining a fork/path override with different
+`Package.swift` target dependencies, which is outside the supported pub.dev app
+configuration.
 
 ### 3. Dynamic Linking
 Using `native_assets_cli`, the downloaded dynamic libraries (`.so`, `.dylib`,
@@ -91,11 +126,9 @@ The hook validates the full expected companion set after extraction so missing
 or stale `litert-lm-native` archives fail during the build rather than later at
 engine creation.
 
-On macOS, LiteRT-LM dylibs are staged as app-bundle frameworks instead of
-opened directly from `.dart_tool`, because sandboxed apps cannot open arbitrary
-files from the build cache. The example chat app includes an Xcode build phase
-that calls `tool/macos_litert_lm_prepare_app.sh` after Flutter embeds its
-frameworks.
+On standalone Dart macOS, LiteRT-LM dylibs stay in the hook cache and the
+runtime loads them directly. Flutter macOS apps use the SwiftPM path instead,
+so the example app does not need a post-build runtime-copy phase.
 
 ### 4. Validation and fallback safeguards
 - Runtime-family selection is explicit: `llama_cpp`, `litert_lm`, or both.
@@ -106,9 +139,9 @@ frameworks.
   to defaults.
 - On `windows-x64`, the hook additionally validates CUDA/BLAS runtime
   dependencies before accepting a bundle.
-- LiteRT-LM archives are checksum-pinned separately from llama.cpp archives and
-  use a cache marker so stale extracted runtimes are re-extracted when the
-  pinned release digest changes.
+- LiteRT-LM archives are validated after extraction by checking the required
+  runtime libraries; corrupt or incomplete cached archives are refreshed before
+  the build continues.
 
 ## The `llamadart-native` Bridge Repo
 

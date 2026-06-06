@@ -7,8 +7,8 @@ This page combines platform support, runtime-family selection, and
 backend-module configuration for
 `llamadart`.
 
-The native-assets hook currently pins `llamadart-native` tag `b9371` and
-`litert-lm-native` release `v0.12.0` (`hook/build.dart`). Apps can override the
+The native-assets hook currently pins `llamadart-native` tag `b9536` and
+`litert-lm-native` release `v0.13.1` (`hook/build.dart`). Apps can override the
 llama.cpp native GitHub source with
 `hooks.user_defines.llamadart.llamadart_native_tag` and
 `hooks.user_defines.llamadart.llamadart_native_repository`, or use a local
@@ -42,8 +42,8 @@ runtime revision.
 | Web (browser) | N/A (JS bridge path) | N/A | Router: llama.cpp WebGPU/CPU for `.gguf`; LiteRT-LM JS for `.litertlm` URLs | Experimental; see [WebGPU Bridge](./webgpu-bridge) and LiteRT-LM web notes below |
 
 All iOS targets above require the consuming Flutter/Xcode project to use a
-minimum deployment target of `16.4` or newer (for example
-`platform :ios, '16.4'`).
+minimum deployment target of `16.4` or newer. If the app still uses CocoaPods,
+set the Podfile platform to `16.4` or newer too.
 
 ## Model format routing
 
@@ -79,9 +79,10 @@ bundled:
 - `llama_cpp`: GGUF model support through llama.cpp.
 - `litert_lm`: `.litertlm` model support through LiteRT-LM.
 
-The default is both runtime families where the target platform has both. This
-maximizes format compatibility, but apps that only ship one model format can
-trim package size:
+Android defaults to both runtime families where available. Other native targets
+default to `llama_cpp` only; opt into `litert_lm` when those apps ship
+`.litertlm` bundles. Apps that only ship one model format can also trim package
+size:
 
 ```yaml
 hooks:
@@ -90,7 +91,8 @@ hooks:
       llamadart_native_runtimes: [llama_cpp]
 ```
 
-Per-platform overrides use the same bundle keys as the tables on this page:
+Per-platform overrides can use OS keys or the exact bundle keys from the tables
+on this page. Exact target keys override OS keys:
 
 ```yaml
 hooks:
@@ -99,16 +101,19 @@ hooks:
       llamadart_native_runtimes:
         runtimes: [llama_cpp, litert_lm]
         platforms:
+          ios: [llama_cpp]
+          macos: [llama_cpp, litert_lm]
           android-arm64: [litert_lm]
           linux-x64: [llama_cpp]
 ```
 
 Accepted aliases include `llama.cpp`, `gguf`, `litert`, and `litert-lm`.
+Use `all` or `both` to include every runtime family for a target.
 Explicitly selecting `litert_lm` for a target without a pinned LiteRT-LM
 runtime fails during the build hook instead of producing an app that cannot
 load `.litertlm` models.
 
-## LiteRT-LM runtime coverage (`v0.12.0`)
+## LiteRT-LM runtime coverage (`v0.13.1`)
 
 | Platform target | LiteRT-LM bundle key | Selectable backends | Status |
 | --- | --- | --- | --- |
@@ -116,7 +121,7 @@ load `.litertlm` models.
 | Android x64 | `android-x64` | `cpu`, `gpu`, `npu` | Supported for emulator/test targets |
 | iOS arm64 (device) | `ios-arm64` | `cpu` | Supported |
 | iOS arm64 (simulator) | `ios-arm64-sim` | `cpu` | Supported |
-| iOS x86_64 (simulator) | `ios-x64-sim` | `cpu` | Supported |
+| iOS x86_64 (simulator) | Not published | N/A | Unsupported; exclude `litert_lm` for this target |
 | macOS arm64 | `macos-arm64` | `cpu`, `gpu` | Supported |
 | macOS x86_64 | `macos-x64` | `cpu`, `gpu` | Supported |
 | Linux arm64 | `linux-arm64` | `cpu` | Supported |
@@ -152,7 +157,7 @@ instead of silently ignoring llama.cpp-only settings.
   a web load failure as a package bug. The [WebGPU Bridge](./webgpu-bridge)
   page has the browser-console probe and Flutter Web smoke-test path.
 
-## Current llama.cpp module availability by bundle (`b9371`)
+## Current llama.cpp module availability by bundle (`b9536`)
 
 | Bundle key | Available backend modules in bundle |
 | --- | --- |
@@ -200,7 +205,7 @@ hooks:
   user_defines:
     llamadart:
       # Optional. Defaults to llamadart's tested native runtime pin.
-      llamadart_native_tag: b9371
+      llamadart_native_tag: b9536
 
       # Optional. GitHub repository slug or github.com URL.
       llamadart_native_repository: leehack/llamadart-native
@@ -264,7 +269,8 @@ no valid entries remain, selection falls back to `cpu_profile` (or default
 
 - Configurable targets start from defaults (`cpu`, `vulkan`) if available.
 - `llamadart_native_runtimes` controls whole native runtime families:
-  `llama_cpp`, `litert_lm`, or both.
+  `llama_cpp`, `litert_lm`, or both. Android defaults to both families; other
+  native targets default to `llama_cpp` only.
 - `llamadart_native_backends` controls only llama.cpp module files inside
   `llama_cpp`; it does not affect LiteRT-LM assets.
 - `cpu` is auto-added as fallback when present in the bundle.
@@ -283,9 +289,28 @@ no valid entries remain, selection falls back to `cpu_profile` (or default
 - Apple targets (`ios-*`, `macos-*`) support `cpu` + `metal`, but ignore
   per-backend module config in this hook path because runtime libraries are
   consolidated.
-- Sandboxed macOS apps must stage LiteRT-LM companion dylibs inside the app
-  bundle. The example chat app does this with the
-  `Prepare LiteRT-LM Frameworks` Xcode build phase.
+- Apple SPM targets resolve runtime libraries through the root package's
+  `darwin/llamadart/Package.swift`, so
+  `llamadart_native_tag`, `llamadart_native_repository`, and
+  `llamadart_native_path` do not change those SPM binary targets. Customize the
+  SwiftPM binary target URL/checksum pins only by using a path/git dependency
+  override or fork of `llamadart`; that is an advanced testing/maintenance
+  escape hatch, not a supported pub.dev consumer configuration. Normal apps
+  consuming `llamadart` from pub.dev cannot customize the published package's
+  `Package.swift` in-place.
+- `llamadart_native_runtimes` still chooses which runtime families the Dart
+  hook reports for Apple SPM builds, but it does not prune SwiftPM binary
+  target dependencies from the linked Apple package. Physically pruning the
+  Apple SPM product requires maintaining a fork/path override with different
+  `Package.swift` target dependencies, which is outside the supported pub.dev
+  app configuration.
+- Flutter Apple builds use the root package's SPM path on iOS and macOS. The
+  old hook-managed iOS wrapper path is disabled to avoid App Store
+  `MinimumOSVersion` mismatches.
+- Standalone Dart macOS runs keep the native-assets fallback for compatibility.
+- Custom standalone Dart macOS launchers can point
+  `LLAMADART_LITERT_LM_LIB_DIR` at the extracted LiteRT-LM cache directory when
+  the default cache search is not suitable.
 - `windows-x64` performs extra runtime dependency validation:
   - `cuda` requires `cudart` and `cublas` DLLs.
   - `blas` requires OpenBLAS DLL.

@@ -484,6 +484,11 @@ class LlamaCppService {
     _refreshBackendModuleDirectoryAfterPrimaryLoad();
     _applyConfiguredLogLevel();
 
+    if ((Platform.isMacOS || Platform.isIOS) &&
+        _backendModuleDirectory == null) {
+      return;
+    }
+
     // Startup path should remain CPU-safe so reading backend options does not
     // initialize optional GPU backends.
     if (_backendModuleDirectory != null) {
@@ -2061,6 +2066,10 @@ class LlamaCppService {
     final executableDir = path.dirname(Platform.resolvedExecutable);
     directories.add(executableDir);
     directories.add(Directory.current.path);
+
+    if (Platform.isIOS) {
+      directories.add(path.normalize(path.join(executableDir, 'Frameworks')));
+    }
 
     if (Platform.isMacOS) {
       directories.add(

@@ -64,17 +64,20 @@ On first `dart run` / `flutter run`, `llamadart` will:
 No manual binary download or C++ build steps are required.
 
 > iOS builds require a minimum deployment target of `16.4` or newer in your
-> Xcode project / Podfile (for example `platform :ios, '16.4'`).
+> Xcode project settings. If your app still uses CocoaPods, set the Podfile
+> platform to `16.4` or newer too.
 
 ### 3. Optional: choose native runtimes for package size
 
-By default, native builds include both runtime families where available:
+By default, Android native builds include both runtime families where available:
 
 - `llama_cpp` for GGUF models.
 - `litert_lm` for `.litertlm` model bundles.
 
-Use `llamadart_native_runtimes` when an app only ships one model format and
-you want to avoid bundling the other runtime family:
+Other native targets default to `llama_cpp` only. Use
+`llamadart_native_runtimes` when an app needs a different package-size /
+model-format tradeoff, such as enabling LiteRT-LM for desktop/iOS or shipping
+only `.litertlm` models:
 
 ```yaml
 hooks:
@@ -83,7 +86,8 @@ hooks:
       llamadart_native_runtimes: [llama_cpp] # or [litert_lm]
 ```
 
-The setting also supports per-target overrides:
+The setting also supports per-OS and exact target overrides. Exact target keys
+override OS keys:
 
 ```yaml
 hooks:
@@ -92,9 +96,13 @@ hooks:
       llamadart_native_runtimes:
         runtimes: [llama_cpp, litert_lm]
         platforms:
+          ios: [llama_cpp]
+          macos: [llama_cpp, litert_lm]
           android-arm64: [litert_lm]
           linux-x64: [llama_cpp]
 ```
+
+Use `all` or `both` to include every runtime family for a target.
 
 ### 4. Optional: choose llama.cpp backend modules per target
 
@@ -104,7 +112,7 @@ hooks:
     llamadart:
       # Optional. Defaults to llamadart's tested native runtime pin.
       # Use a leehack/llamadart-native release tag when testing another build.
-      llamadart_native_tag: b9371
+      llamadart_native_tag: b9536
 
       # Optional. GitHub repository slug or github.com URL.
       llamadart_native_repository: leehack/llamadart-native
@@ -132,7 +140,7 @@ the native-assets hook fails while downloading that asset.
 
 Native source overrides are for compatibility testing. They do not regenerate
 Dart FFI bindings or symbol lookups, so the selected binary still must be ABI-
-and symbol-compatible with the default `leehack/llamadart-native@b9371` runtime.
+and symbol-compatible with the default `leehack/llamadart-native@b9536` runtime.
 
 Available native tags are published on the
 [`leehack/llamadart-native` releases page](https://github.com/leehack/llamadart-native/releases).
@@ -144,7 +152,7 @@ gh release list --repo leehack/llamadart-native --limit 20
 
 Before overriding, confirm the release includes the asset for your target. The
 hook downloads files named `llamadart-native-<bundle>-<tag>.tar.gz`, for example
-`llamadart-native-windows-x64-b9371.tar.gz`.
+`llamadart-native-windows-x64-b9536.tar.gz`.
 For local testing, `llamadart_native_path` may point directly at a bundle
 archive, at an extracted bundle directory, or at a directory containing
 `<tag>/<bundle>/`, `<bundle>/`, or the expected archive file.
@@ -172,10 +180,8 @@ path or URL. Native callers load local bundle paths; web callers load
 web-compatible `.litertlm` URLs through the LiteRT-LM JavaScript runtime.
 Android callers can opt into the LiteRT-LM NPU delegate through `ModelParams`:
 
-Sandboxed macOS apps must stage LiteRT-LM companion dylibs inside the `.app`
-bundle. The chat app example includes a `Prepare LiteRT-LM Frameworks` Xcode
-build phase that copies the pinned LiteRT-LM runtime into
-`Contents/Frameworks`. Standalone desktop VM tools also search the extracted
+Flutter Apple apps load LiteRT-LM through the package SwiftPM integration.
+Standalone desktop VM tools search the extracted
 `.dart_tool/llamadart/litert_lm/<version>/<platform>/<arch>` cache; set
 `LLAMADART_LITERT_LM_LIB_DIR` to that directory for custom CI or launcher
 layouts.
@@ -366,7 +372,7 @@ rejected until LiteRT-LM exposes equivalent runtime controls.
 <details>
 <summary>Full module matrix (available modules by target)</summary>
 
-Available llama.cpp module matrix from the default native tag `b9371`:
+Available llama.cpp module matrix from the default native tag `b9536`:
 
 | Target | Available backend modules in bundle |
 |--------|-------------------------------------|
@@ -458,8 +464,10 @@ Notes:
   lookups, so the selected binary must remain compatible with the default
   runtime revision.
 - `llamadart_native_runtimes` controls whole native runtime families:
-  `llama_cpp`, `litert_lm`, or both. Use it to trim package size when an app
-  only ships GGUF or only ships `.litertlm` models.
+  `llama_cpp`, `litert_lm`, or both. Use it globally, per OS, or per exact
+  target to enable LiteRT-LM outside Android or to trim package size when an
+  app only ships GGUF or only ships `.litertlm` models. Android includes
+  LiteRT-LM by default; other native targets default to `llama_cpp` only.
 - `llamadart_native_backends` controls llama.cpp module files inside the
   `llama_cpp` runtime family. It does not affect LiteRT-LM assets.
 - Configurable targets always keep `cpu` bundled as a fallback.
@@ -485,7 +493,32 @@ Notes:
 - `ModelParams.mainGpu` passes through to llama.cpp `main_gpu`. To select one GPU for the full model, use `splitMode: ModelSplitMode.none` with the desired `mainGpu` index.
 - `ModelParams.batchSize` (`n_batch`) and `ModelParams.microBatchSize` (`n_ubatch`) can be set independently for memory/performance tuning; defaults keep legacy behavior (`n_batch = n_ctx`, `n_ubatch = n_batch`).
 - `ModelParams.preferMemory64` and `ModelParams.modelBytesHint` are web/WebGPU only (ignored on native). They select the 64-bit (wasm64/mem64) bridge core so models larger than the ~4 GiB wasm32 address space (for example Gemma 4 E2B) can load; `null` auto-decides from the size hint (size-driven, no hardcoded model names). See the [WebGPU bridge docs](https://leehack.github.io/llamadart/docs/platforms/webgpu-bridge).
-- Apple targets are intentionally non-configurable in this hook path and use consolidated native libraries.
+- Apple targets use consolidated llama.cpp native libraries, so
+  `llamadart_native_backends` does not split Apple backend modules. Use
+  `llamadart_native_runtimes` to include or exclude the llama.cpp or LiteRT-LM
+  runtime families on Apple targets.
+- Apple Swift Package Manager builds use the root `llamadart` package's
+  `darwin/llamadart/Package.swift` pins for native binary versions. In that
+  mode, Apple binary source customization moves from the Dart hook to those
+  binary target URL/checksum pins;
+  `llamadart_native_tag`, `llamadart_native_repository`, and
+  `llamadart_native_path` still apply to non-Apple targets and standalone Dart
+  macOS fallback mode, but they do not rewrite SPM URL/checksum pins. Normal
+  apps consuming `llamadart` from pub.dev cannot customize the published
+  package's `Package.swift` in-place, so Apple SPM binary version overrides are
+  not part of the supported app-level customization surface. A path/git
+  dependency override or fork of `llamadart` with different `Package.swift`
+  pins is an advanced testing/maintenance escape hatch, not a pub.dev consumer
+  configuration.
+- `llamadart_native_runtimes` still controls which runtime families the hook
+  reports for Apple SPM builds. It does not prune the SwiftPM binary target
+  dependencies from the linked Apple package. Physically pruning the Apple SPM
+  product requires maintaining a fork/path override with different
+  `Package.swift` target dependencies, which is outside the supported pub.dev
+  app configuration. Flutter Apple builds use SPM on both iOS and macOS so the
+  old hook-managed wrapper path cannot recreate App Store `MinimumOSVersion`
+  mismatches. Standalone Dart macOS runs keep the native-assets dylib path for
+  compatibility.
 - The native-assets hook refreshes emitted files each build; if you change `hooks.user_defines` or are upgrading from older cached outputs, run `flutter clean && flutter pub get` before rebuilding.
 - Some Vulkan drivers can crash when probing cooperative matrix support. This
   is a driver-side failure in the Vulkan property query path, not a llamadart
@@ -655,10 +688,16 @@ Current pinned runtime artifacts:
 
 | Runtime path | Published artifact |
 |--------------|--------------------|
-| Native llama.cpp / GGUF | `leehack/llamadart-native@b9371` |
-| Native LiteRT-LM / `.litertlm` | `leehack/litert-lm-native@v0.12.0` |
+| Native llama.cpp / GGUF | `leehack/llamadart-native@b9536` |
+| Native LiteRT-LM / `.litertlm` | `leehack/litert-lm-native@v0.13.1` |
+| Apple SPM llama.cpp / GGUF | `leehack/llamadart-native@b9536` Apple XCFramework |
+| Apple SPM LiteRT-LM / `.litertlm` | `leehack/litert-lm-native@v0.13.1` Apple XCFrameworks |
 | Web llama.cpp / GGUF | `leehack/llama-web-bridge-assets@v0.1.16` |
 | Web LiteRT-LM / `.litertlm` | App-provided `@litert-lm/core` module URL; the chat app defaults to jsDelivr `@litert-lm/core/+esm` |
+
+When bumping native runtime pins, publish the matching native repo release
+artifacts first, then update `darwin/llamadart/Package.swift` checksums from the
+exact uploaded Apple XCFramework zips.
 
 Core abstractions in this package:
 
