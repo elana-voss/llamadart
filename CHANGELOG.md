@@ -1,5 +1,10 @@
 ## Unreleased
 
+* **Structured output**:
+  * Added `responseFormat` routing to `LlamaEngine.create(...)` for
+    grammar-capable backends, deprecated the legacy `chatTemplate(...)`
+    `jsonSchema` shortcut, and made strict response-format requests fail early
+    on LiteRT-LM instead of silently degrading to unconstrained generation.
 * **LiteRT-LM chat parity**:
   * Routed eligible native `.litertlm` text chat through LiteRT-LM Conversation
     APIs so structured history, system messages, tool declarations, and
