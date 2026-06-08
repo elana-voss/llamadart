@@ -7,6 +7,8 @@ import 'dart:isolate';
 import 'package:ffi/ffi.dart';
 import 'package:path/path.dart' as path;
 
+import '../../core/models/inference/model_params.dart';
+
 const _litertLmVersion = '0.13.1';
 const _litertLmLibDirEnv = 'LLAMADART_LITERT_LM_LIB_DIR';
 const _liteRtLmIosNativeAsset = 'package:llamadart/litert_lm_LiteRtLm';
@@ -410,6 +412,10 @@ class LiteRtLmRuntimeClient {
     String? cacheDir,
     bool speculativeDecoding = true,
     int minLogLevel = 3,
+    LiteRtLmActivationDataType? activationDataType,
+    int? prefillChunkSize,
+    bool? parallelFileSectionLoading,
+    String? dispatchLibDir,
   }) async {
     if (maxTokens <= 0) {
       throw ArgumentError.value(maxTokens, 'maxTokens', 'must be positive');
@@ -428,6 +434,20 @@ class LiteRtLmRuntimeClient {
         'must be positive when provided',
       );
     }
+    if (prefillChunkSize != null && prefillChunkSize <= 0) {
+      throw ArgumentError.value(
+        prefillChunkSize,
+        'prefillChunkSize',
+        'must be positive when provided',
+      );
+    }
+    if (dispatchLibDir != null && dispatchLibDir.trim().isEmpty) {
+      throw ArgumentError.value(
+        dispatchLibDir,
+        'dispatchLibDir',
+        'must be non-empty when provided',
+      );
+    }
     final resolvedBackend = _normalizeLiteRtLmRuntimeBackend(backend);
 
     _ensureLibrariesLoaded();
@@ -440,6 +460,7 @@ class LiteRtLmRuntimeClient {
     final modelPathPtr = modelPath.toNativeUtf8(allocator: calloc);
     final backendPtr = resolvedBackend.toNativeUtf8(allocator: calloc);
     final cacheDirPtr = cacheDir?.toNativeUtf8(allocator: calloc);
+    final dispatchLibDirPtr = dispatchLibDir?.toNativeUtf8(allocator: calloc);
     Pointer<_LiteRtLmEngineSettings> settings = nullptr;
 
     try {
@@ -459,11 +480,32 @@ class LiteRtLmRuntimeClient {
         settings,
         speculativeDecoding,
       );
+      if (parallelFileSectionLoading != null) {
+        bindings.engineSettingsSetParallelFileSectionLoading(
+          settings,
+          parallelFileSectionLoading,
+        );
+      }
+      if (activationDataType != null) {
+        bindings.engineSettingsSetActivationDataType(
+          settings,
+          activationDataType.nativeValue,
+        );
+      }
+      if (prefillChunkSize != null) {
+        bindings.engineSettingsSetPrefillChunkSize(settings, prefillChunkSize);
+      }
       if (prefillTokens != null) {
         bindings.engineSettingsSetNumPrefillTokens(settings, prefillTokens);
       }
       if (cacheDirPtr != null) {
         bindings.engineSettingsSetCacheDir(settings, cacheDirPtr.cast());
+      }
+      if (dispatchLibDirPtr != null) {
+        bindings.engineSettingsSetLiteRtDispatchLibDir(
+          settings,
+          dispatchLibDirPtr.cast(),
+        );
       }
 
       final settingsAddress = settings.address;
@@ -500,6 +542,9 @@ class LiteRtLmRuntimeClient {
       calloc.free(backendPtr);
       if (cacheDirPtr != null) {
         calloc.free(cacheDirPtr);
+      }
+      if (dispatchLibDirPtr != null) {
+        calloc.free(dispatchLibDirPtr);
       }
     }
   }
@@ -1797,6 +1842,30 @@ class _LiteRtLmBindings {
         Void Function(Pointer<_LiteRtLmEngineSettings>, Pointer<Char>),
         void Function(Pointer<_LiteRtLmEngineSettings>, Pointer<Char>)
       >('litert_lm_engine_settings_set_cache_dir');
+
+  late final engineSettingsSetParallelFileSectionLoading = _library
+      .lookupFunction<
+        Void Function(Pointer<_LiteRtLmEngineSettings>, Bool),
+        void Function(Pointer<_LiteRtLmEngineSettings>, bool)
+      >('litert_lm_engine_settings_set_parallel_file_section_loading');
+
+  late final engineSettingsSetLiteRtDispatchLibDir = _library
+      .lookupFunction<
+        Void Function(Pointer<_LiteRtLmEngineSettings>, Pointer<Char>),
+        void Function(Pointer<_LiteRtLmEngineSettings>, Pointer<Char>)
+      >('litert_lm_engine_settings_set_litert_dispatch_lib_dir');
+
+  late final engineSettingsSetActivationDataType = _library
+      .lookupFunction<
+        Void Function(Pointer<_LiteRtLmEngineSettings>, Int),
+        void Function(Pointer<_LiteRtLmEngineSettings>, int)
+      >('litert_lm_engine_settings_set_activation_data_type');
+
+  late final engineSettingsSetPrefillChunkSize = _library
+      .lookupFunction<
+        Void Function(Pointer<_LiteRtLmEngineSettings>, Int),
+        void Function(Pointer<_LiteRtLmEngineSettings>, int)
+      >('litert_lm_engine_settings_set_prefill_chunk_size');
 
   late final engineDelete = _library
       .lookupFunction<

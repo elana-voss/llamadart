@@ -569,6 +569,11 @@ class LiteRtLmService {
         cacheDir: _defaultCacheDir(),
         speculativeDecoding: resolvedSpeculativeDecoding,
         minLogLevel: _liteRtLmMinLogLevel(_logLevel),
+        activationDataType: modelParams.liteRtLmActivationDataType,
+        prefillChunkSize: modelParams.liteRtLmPrefillChunkSize,
+        parallelFileSectionLoading:
+            modelParams.liteRtLmParallelFileSectionLoading,
+        dispatchLibDir: modelParams.liteRtLmDispatchLibDir,
       );
     } catch (_) {
       try {
@@ -766,7 +771,9 @@ class LiteRtLmService {
       'LiteRtLmBackend does not support llama.cpp-specific ModelParams: '
       '${unsupported.join(', ')}. Supported LiteRT-LM load options are '
       'contextSize, chatTemplate, preferredBackend, all-or-CPU gpuLayers '
-      'hints, and liteRtLmBackend for explicit CPU/GPU/NPU selection.',
+      'hints, liteRtLmBackend for explicit CPU/GPU/NPU selection, '
+      'liteRtLmActivationDataType, liteRtLmPrefillChunkSize, '
+      'liteRtLmParallelFileSectionLoading, and liteRtLmDispatchLibDir.',
     );
   }
 
