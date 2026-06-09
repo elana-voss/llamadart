@@ -4,7 +4,6 @@ import PackageDescription
 
 let packageRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
 let artifactsRoot = packageRoot.appendingPathComponent("Artifacts")
-let llamaCppTag = "b9547"
 let liteRtLmTag = "v0.13.1"
 
 func localArtifactPath(_ name: String) -> String? {
@@ -30,32 +29,19 @@ func nativeRepoBinaryTarget(
 }
 
 let package = Package(
-    name: "llamadart",
+    name: "llamadart_litert_lm_flutter",
     platforms: [
         .iOS("16.4"),
         .macOS("14.0")
     ],
     products: [
         .library(
-            name: "llamadart",
+            name: "llamadart-litert-lm-flutter",
             type: .dynamic,
-            targets: ["llamadart"]
+            targets: ["llamadart_litert_lm_flutter"]
         )
     ],
     targets: [
-        // Native version management:
-        // Keep llamaCppTag aligned with _llamaCppTag in hook/build.dart.
-        // Keep liteRtLmTag aligned with _litertLmVersion in hook/build.dart.
-        // After native release workflows
-        // publish Apple XCFramework zips, refresh each checksum with
-        // `swift package compute-checksum <zip>`.
-        nativeRepoBinaryTarget(
-            name: "llama",
-            repository: "leehack/llamadart-native",
-            artifactName: "llamadart-native-apple-xcframework-\(llamaCppTag).zip",
-            tag: llamaCppTag,
-            checksum: "df326c10018c0ac739560d0744db52598b7ea8158fd935b02f769d3ac2905237"
-        ),
         nativeRepoBinaryTarget(
             name: "LiteRtLm",
             repository: "leehack/litert-lm-native",
@@ -113,9 +99,8 @@ let package = Package(
             checksum: "9a3de6686d37cf06475b4fd8dfb094aaa8e3f55b1cbbdc60ae38e6eb8f5f1ba1"
         ),
         .target(
-            name: "llamadart",
+            name: "llamadart_litert_lm_flutter",
             dependencies: [
-                "llama",
                 "LiteRtLm",
                 .target(name: "CLiteRTLM", condition: .when(platforms: [.iOS])),
                 .target(name: "GemmaModelConstraintProvider", condition: .when(platforms: [.macOS])),
@@ -126,7 +111,6 @@ let package = Package(
                 .target(name: "LiteRtWebGpuAccelerator", condition: .when(platforms: [.macOS]))
             ],
             linkerSettings: [
-                .unsafeFlags(["-Xlinker", "-reexport_framework", "-Xlinker", "llama"]),
                 .unsafeFlags(["-Xlinker", "-reexport_framework", "-Xlinker", "LiteRtLm"]),
                 .unsafeFlags(["-Xlinker", "-reexport_framework", "-Xlinker", "CLiteRTLM"], .when(platforms: [.iOS]))
             ]
