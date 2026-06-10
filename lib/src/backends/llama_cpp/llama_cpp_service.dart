@@ -256,6 +256,20 @@ external Pointer<llama_dart_mtp> _llamadartWrapperMtpInit(
   bool backendSampling,
 );
 
+@Native<_LlamaDartMtpInitNative>(
+  assetId: _llamadartWrapperAssetId,
+  symbol: 'llama_dart_mtp_init_with_draft_model',
+)
+external Pointer<llama_dart_mtp> _llamadartWrapperMtpInitWithDraftModel(
+  Pointer<llama_model> draftModel,
+  Pointer<llama_context> context,
+  llama_context_params contextParams,
+  int draftTokenMax,
+  int draftTokenMin,
+  double minProbability,
+  bool backendSampling,
+);
+
 @Native<_LlamaDartMtpFreeNative>(
   assetId: _llamadartWrapperAssetId,
   symbol: 'llama_dart_mtp_free',
@@ -340,11 +354,13 @@ class _LlamaCppMtpConfig {
     required this.draftTokenMax,
     required this.draftTokenMin,
     required this.minProbability,
+    required this.draftModelPath,
   });
 
   final int draftTokenMax;
   final int draftTokenMin;
   final double minProbability;
+  final String? draftModelPath;
 }
 
 /// Service responsible for managing Llama.cpp models and contexts.
@@ -364,11 +380,6 @@ class LlamaCppService {
     'LLAMADART_ANDROID_VULKAN_ALLOW_FLASH_ATTN',
     defaultValue: false,
   );
-  static const bool _androidVulkanAllowMtp = bool.fromEnvironment(
-    'LLAMADART_ANDROID_VULKAN_ALLOW_MTP',
-    defaultValue: false,
-  );
-
   static const int _maxStartupDiagnostics = 32;
   static const Map<String, int> _androidCpuVariantPriority = <String, int>{
     'android_armv9.2_2': 0,
@@ -438,6 +449,10 @@ class LlamaCppService {
   final Map<int, Map<String, double>> _activeLoras = {};
   final Map<int, String> _modelBackendNames = <int, String>{};
   final Map<int, int> _modelResolvedGpuLayers = <int, int>{};
+  final Map<int, ModelParams> _modelLoadParams = <int, ModelParams>{};
+  final Map<String, _LlamaModelWrapper> _mtpDraftModels =
+      <String, _LlamaModelWrapper>{};
+  final Map<int, Set<String>> _modelToMtpDraftModelKeys = <int, Set<String>>{};
 
   /// Refcount of in-flight `generate()` calls per context. A set would let the
   /// first completion clear the marker while another decode is still running.
@@ -512,43 +527,6 @@ class LlamaCppService {
         resolvedGpuLayers ?? resolveGpuLayersForLoad(modelParams);
     return modelParams.preferredBackend == GpuBackend.vulkan &&
         effectiveGpuLayers > 0;
-  }
-
-  /// Returns whether Android should enable the experimental Vulkan fast path
-  /// for the given local model file.
-  static bool shouldEnableExperimentalAndroidVulkanAcceleration(
-    String? modelPath, {
-    bool isAndroid = false,
-  }) {
-    if (!isAndroid || modelPath == null || modelPath.isEmpty) {
-      return false;
-    }
-
-    final normalized = path.basename(modelPath).toLowerCase();
-    return normalized.contains('qwen3.5-0.8b') ||
-        normalized.contains('qwen3.5-2b') ||
-        normalized.contains('qwen3.5-4b') ||
-        normalized.contains('qwen_qwen3.5-0.8b') ||
-        normalized.contains('qwen_qwen3.5-2b') ||
-        normalized.contains('qwen_qwen3.5-4b');
-  }
-
-  /// Returns whether Android Vulkan MTP should be rejected before generation.
-  ///
-  /// Upstream llama.cpp `draft-mtp` backend sampling currently can abort Android
-  /// Vulkan processes with `vk::DeviceLostError`. Keep the public feature usable
-  /// on CPU and other backends, but fail fast for this backend combination unless
-  /// explicitly enabled for debugging/benchmarking.
-  static bool shouldRejectAndroidVulkanMtp(
-    String? backendName, {
-    int? resolvedGpuLayers,
-    bool isAndroid = false,
-    bool allowMtp = false,
-  }) {
-    if (!isAndroid || allowMtp || (resolvedGpuLayers ?? 0) <= 0) {
-      return false;
-    }
-    return (backendName ?? '').toLowerCase().contains('vulkan');
   }
 
   /// Resolves effective context batch parameters.
@@ -1462,20 +1440,7 @@ class LlamaCppService {
   /// Returns a handle to the loaded model.
   /// Throws an [Exception] if the file does not exist or fails to load.
   int loadModel(String modelPath, ModelParams modelParams) {
-    final modelFile = File(modelPath);
-    if (!modelFile.existsSync()) {
-      throw Exception("File not found: $modelPath");
-    }
-    final modelFileSize = modelFile.lengthSync();
-    if (modelFileSize <= 0) {
-      throw Exception("Model file is empty: $modelPath");
-    }
-    if (!_looksLikeGguf(modelFile)) {
-      throw Exception(
-        "Model file does not appear to be GGUF: $modelPath. "
-        "Please verify the download completed correctly.",
-      );
-    }
+    final modelFileSize = _validateGgufModelFile(modelPath, 'Model');
 
     _applyConfiguredLogLevel();
     final effectiveBackend = resolvePreferredBackendForLoad(
@@ -1550,10 +1515,113 @@ class LlamaCppService {
     );
     _modelBackendNames[handle] = resolvedBackend;
     _modelResolvedGpuLayers[handle] = gpuLayers;
+    _modelLoadParams[handle] = modelParams;
     _activeBackendName = resolvedBackend;
     _activeResolvedGpuLayers = gpuLayers;
 
     return handle;
+  }
+
+  int _validateGgufModelFile(String modelPath, String label) {
+    final modelFile = File(modelPath);
+    if (!modelFile.existsSync()) {
+      throw Exception("$label file not found: $modelPath");
+    }
+    final modelFileSize = modelFile.lengthSync();
+    if (modelFileSize <= 0) {
+      throw Exception("$label file is empty: $modelPath");
+    }
+    if (!_looksLikeGguf(modelFile)) {
+      throw Exception(
+        "$label file does not appear to be GGUF: $modelPath. "
+        "Please verify the download completed correctly.",
+      );
+    }
+    return modelFileSize;
+  }
+
+  String _mtpDraftModelCacheKey(
+    int targetModelHandle,
+    String draftModelPath,
+    int resolvedGpuLayers,
+  ) {
+    final normalizedPath = File(draftModelPath).absolute.path;
+    return '$targetModelHandle\x00$normalizedPath\x00$resolvedGpuLayers';
+  }
+
+  _LlamaModelWrapper _loadMtpDraftModel(
+    int targetModelHandle,
+    String draftModelPath,
+  ) {
+    final modelFileSize = _validateGgufModelFile(
+      draftModelPath,
+      'MTP draft model',
+    );
+    final targetModelParams =
+        _modelLoadParams[targetModelHandle] ?? const ModelParams();
+    final targetBackendName = _modelBackendNames[targetModelHandle];
+    final effectiveBackend = targetBackendName == _backendDisplayName('cpu')
+        ? GpuBackend.cpu
+        : resolvePreferredBackendForLoad(
+            targetModelParams,
+            isAndroid: Platform.isAndroid,
+          );
+    final targetResolvedGpuLayers =
+        _modelResolvedGpuLayers[targetModelHandle] ??
+        resolveGpuLayersForLoad(
+          targetModelParams,
+          isAndroid: Platform.isAndroid,
+        );
+    final draftBackend = effectiveBackend;
+    final draftGpuLayers = targetResolvedGpuLayers;
+    final cacheKey = _mtpDraftModelCacheKey(
+      targetModelHandle,
+      draftModelPath,
+      draftGpuLayers,
+    );
+
+    final cached = _mtpDraftModels[cacheKey];
+    if (cached != null) {
+      return cached;
+    }
+
+    _prepareBackendsForModelLoad(draftBackend);
+
+    final modelPathPtr = draftModelPath.toNativeUtf8();
+    final mparams = llama_model_default_params();
+    final preferredDevices = _createPreferredDeviceList(draftBackend);
+    mparams.n_gpu_layers = draftGpuLayers;
+    mparams.split_modeAsInt = targetModelParams.splitMode.llamaCppValue;
+    mparams.main_gpu = targetModelParams.mainGpu;
+    applyModelParams(mparams, targetModelParams);
+    if (preferredDevices != null) {
+      mparams.devices = preferredDevices;
+    }
+
+    Pointer<llama_model> modelPtr = nullptr;
+    try {
+      modelPtr = llama_model_load_from_file(modelPathPtr.cast(), mparams);
+    } finally {
+      malloc.free(modelPathPtr);
+      if (preferredDevices != null) {
+        malloc.free(preferredDevices);
+      }
+    }
+
+    if (modelPtr == nullptr) {
+      final diagnostics = _backendDiagnostics();
+      throw Exception(
+        "Failed to load MTP draft model (size=$modelFileSize bytes, "
+        "path=$draftModelPath, diagnostics=$diagnostics)",
+      );
+    }
+
+    final wrapper = _LlamaModelWrapper(modelPtr, sourcePath: draftModelPath);
+    _mtpDraftModels[cacheKey] = wrapper;
+    _modelToMtpDraftModelKeys
+        .putIfAbsent(targetModelHandle, () => <String>{})
+        .add(cacheKey);
+    return wrapper;
   }
 
   String _resolveBackendNameForLoad({
@@ -2866,6 +2934,13 @@ class LlamaCppService {
 
     _modelBackendNames.remove(modelHandle);
     _modelResolvedGpuLayers.remove(modelHandle);
+    _modelLoadParams.remove(modelHandle);
+    final draftModelKeys = _modelToMtpDraftModelKeys.remove(modelHandle);
+    if (draftModelKeys != null) {
+      for (final key in draftModelKeys) {
+        _mtpDraftModels.remove(key)?.dispose();
+      }
+    }
     if (_modelBackendNames.isEmpty) {
       _activeBackendName = _backendDisplayName('cpu');
       _activeResolvedGpuLayers = 0;
@@ -2924,25 +2999,13 @@ class LlamaCppService {
       resolvedGpuLayers: resolvedModelGpuLayers,
       isAndroid: Platform.isAndroid,
     )) {
-      final enableExperimentalAcceleration =
-          shouldEnableExperimentalAndroidVulkanAcceleration(
-            model.sourcePath,
-            isAndroid: Platform.isAndroid,
-          );
-      final allowKqv =
-          _androidVulkanAllowKqvOffload || enableExperimentalAcceleration;
-      final allowOp =
-          _androidVulkanAllowOpOffload || enableExperimentalAcceleration;
-      final allowFlash =
-          _androidVulkanAllowFlashAttn || enableExperimentalAcceleration;
-
-      if (!allowKqv) {
+      if (!_androidVulkanAllowKqvOffload) {
         ctxParams.offload_kqv = false;
       }
-      if (!allowOp) {
+      if (!_androidVulkanAllowOpOffload) {
         ctxParams.op_offload = false;
       }
-      if (!allowFlash) {
+      if (!_androidVulkanAllowFlashAttn) {
         ctxParams.flash_attn_typeAsInt =
             llama_flash_attn_type.LLAMA_FLASH_ATTN_TYPE_DISABLED.value;
       }
@@ -3022,6 +3085,7 @@ class LlamaCppService {
     final draftTokenMax = speculativeConfig.draftTokenMax ?? 1;
     final draftTokenMin = speculativeConfig.draftTokenMin ?? 0;
     final minProbability = speculativeConfig.minProbability ?? 0.0;
+    final draftModelPath = speculativeConfig.draftModelPath;
 
     if (draftTokenMax <= 0) {
       throw RangeError.value(
@@ -3044,11 +3108,19 @@ class LlamaCppService {
         'must be between 0.0 and 1.0 for llama.cpp MTP',
       );
     }
+    if (draftModelPath != null && draftModelPath.trim().isEmpty) {
+      throw ArgumentError.value(
+        draftModelPath,
+        'draftModelPath',
+        'must be null or a non-empty path for llama.cpp MTP',
+      );
+    }
 
     return _LlamaCppMtpConfig(
       draftTokenMax: draftTokenMax,
       draftTokenMin: draftTokenMin,
       minProbability: minProbability,
+      draftModelPath: draftModelPath,
     );
   }
 
@@ -3092,21 +3164,6 @@ class LlamaCppService {
         params,
         hasMediaParts: hasMediaParts,
       );
-      if (mtpConfig != null &&
-          shouldRejectAndroidVulkanMtp(
-            _modelBackendNames[modelHandle],
-            resolvedGpuLayers: _modelResolvedGpuLayers[modelHandle],
-            isAndroid: Platform.isAndroid,
-            allowMtp: _androidVulkanAllowMtp,
-          )) {
-        throw UnsupportedError(
-          'llama.cpp MTP speculative decoding is disabled for Android Vulkan '
-          'because the upstream draft-mtp backend-sampling path can abort with '
-          'vk::DeviceLostError. Use the CPU backend, disable MTP, or rebuild '
-          'with LLAMADART_ANDROID_VULKAN_ALLOW_MTP=true for debugging.',
-        );
-      }
-
       // 1. Reset Context
       ctx = _resetContext(
         contextHandle,
@@ -3129,20 +3186,28 @@ class LlamaCppService {
 
       if (mtpConfig != null) {
         mtpApi = _resolveMtpApi();
-        mtpSession = mtpApi.init(
-          model.pointer,
-          ctx.pointer,
-          modelParams,
-          mtpConfig.draftTokenMax,
-          mtpConfig.draftTokenMin,
-          mtpConfig.minProbability,
-          true,
+        final draftModelPath = mtpConfig.draftModelPath;
+        final draftModel = draftModelPath == null
+            ? null
+            : _loadMtpDraftModel(modelHandle, draftModelPath);
+        mtpSession = mtpApi.initSession(
+          targetModel: model.pointer,
+          draftModel: draftModel?.pointer,
+          targetContext: ctx.pointer,
+          contextParams: modelParams,
+          draftTokenMax: mtpConfig.draftTokenMax,
+          draftTokenMin: mtpConfig.draftTokenMin,
+          minProbability: mtpConfig.minProbability,
+          backendSampling: true,
         );
         if (mtpSession == nullptr) {
+          final draftHint = draftModelPath == null
+              ? 'Use an MTP GGUF model'
+              : 'Verify the draft model is compatible with the target model';
           throw UnsupportedError(
             'llama.cpp MTP speculative decoding is not available for this '
-            'model/context. Use an MTP GGUF model, a native libllamadart build '
-            'that includes llama-common, and set '
+            'model/context. $draftHint, a native libllamadart build that '
+            'includes llama-common and external-draft MTP symbols, and set '
             'ModelParams.speculativeRollbackTokenMax >= draftTokenMax when the '
             'target architecture needs bounded rollback snapshots.',
           );
@@ -4294,6 +4359,7 @@ class LlamaCppService {
     evalStopwatch.stop();
     ctx.lastPerfEvalMs = evalMicros / 1000.0;
     ctx.lastPerfSampleMs = sampleMicros / 1000.0;
+    ctx.lastPerfDecodeMs = evalMicros / 1000.0;
     ctx.lastPerfEvalTokens = generatedTokens;
     ctx.lastPerfSampleCount = generatedTokens;
   }
@@ -4327,7 +4393,11 @@ class LlamaCppService {
     final evalStopwatch = Stopwatch()..start();
     var sampleMicros = 0;
     var evalMicros = 0;
+    var draftMicros = 0;
+    var verifyMicros = 0;
     var generatedTokens = 0;
+    var speculativeDraftTokens = 0;
+    var speculativeAcceptedDraftTokens = 0;
     var shouldStop = false;
 
     try {
@@ -4374,7 +4444,7 @@ class LlamaCppService {
             }
           }
 
-          if (shouldStop || generatedTokens >= params.maxTokens) {
+          if (shouldStop) {
             break;
           }
         }
@@ -4385,13 +4455,15 @@ class LlamaCppService {
         final contextDraftCapacity = rollbackCapacity > 0
             ? math.min(nCtx - currentPos - 2, rollbackCapacity)
             : nCtx - currentPos - 2;
-        final draftLimit = math.min(
-          mtpConfig.draftTokenMax,
-          math.min(
-            math.min(remainingToGenerate - 1, contextDraftCapacity),
-            batchCapacity - 1,
-          ),
-        );
+        final draftLimit = remainingToGenerate <= 1
+            ? 0
+            : math.min(
+                mtpConfig.draftTokenMax,
+                math.min(
+                  math.min(remainingToGenerate - 1, contextDraftCapacity),
+                  batchCapacity - 1,
+                ),
+              );
 
         var draftCount = 0;
         if (draftLimit > 0) {
@@ -4408,10 +4480,11 @@ class LlamaCppService {
             draftCapacity,
           );
           draftTick.stop();
-          sampleMicros += draftTick.elapsedMicroseconds;
+          draftMicros += draftTick.elapsedMicroseconds;
           if (draftCount < 0) {
             throw Exception("llama.cpp MTP draft failed");
           }
+          speculativeDraftTokens += draftCount;
         }
 
         if (draftCount <= 0) {
@@ -4488,12 +4561,13 @@ class LlamaCppService {
           batchTokens,
         );
         verifyTick.stop();
-        sampleMicros += verifyTick.elapsedMicroseconds;
+        verifyMicros += verifyTick.elapsedMicroseconds;
         if (acceptedCount <= 0) {
           throw Exception("llama.cpp MTP draft verification failed");
         }
 
         final acceptedDraftCount = acceptedCount - 1;
+        speculativeAcceptedDraftTokens += acceptedDraftCount;
         mtpApi.accept(mtpSession, 0, acceptedDraftCount);
 
         final keepUntil = currentPos + 1 + acceptedDraftCount;
@@ -4563,8 +4637,14 @@ class LlamaCppService {
       evalStopwatch.stop();
       ctx.lastPerfEvalMs = evalMicros / 1000.0;
       ctx.lastPerfSampleMs = sampleMicros / 1000.0;
+      ctx.lastPerfDecodeMs = evalMicros / 1000.0;
+      ctx.lastPerfSpeculativeDraftMs = draftMicros / 1000.0;
+      ctx.lastPerfSpeculativeVerifyMs = verifyMicros / 1000.0;
       ctx.lastPerfEvalTokens = generatedTokens;
       ctx.lastPerfSampleCount = generatedTokens;
+      ctx.lastPerfSpeculativeDraftTokens = speculativeDraftTokens;
+      ctx.lastPerfSpeculativeAcceptedDraftTokens =
+          speculativeAcceptedDraftTokens;
     }
   }
 
@@ -5154,8 +5234,14 @@ class LlamaCppService {
       m.dispose();
     }
     _models.clear();
+    for (final m in _mtpDraftModels.values) {
+      m.dispose();
+    }
+    _mtpDraftModels.clear();
+    _modelToMtpDraftModelKeys.clear();
     _modelBackendNames.clear();
     _modelResolvedGpuLayers.clear();
+    _modelLoadParams.clear();
     _activeBackendName = _backendDisplayName('cpu');
     _activeResolvedGpuLayers = 0;
     for (final m in _mtmdContexts.values) {
@@ -5581,10 +5667,15 @@ class LlamaCppService {
     double promptEvalMs,
     double evalMs,
     double sampleMs,
+    double? decodeMs,
     int promptEvalTokens,
     int evalTokens,
     int sampleCount,
     int reusedGraphs,
+    int? speculativeDraftTokens,
+    int? speculativeAcceptedDraftTokens,
+    double? speculativeDraftMs,
+    double? speculativeVerifyMs,
   })
   getPerformanceContext(int contextHandle) {
     final ctx = _contexts[contextHandle];
@@ -5612,16 +5703,35 @@ class LlamaCppService {
     final sampleCount = ctx.lastPerfSampleCount > 0
         ? ctx.lastPerfSampleCount
         : (samplerPerf?.n_sample ?? 0);
+    final decodeMs = ctx.lastPerfDecodeMs > 0 ? ctx.lastPerfDecodeMs : null;
+    final speculativeDraftTokens = ctx.lastPerfSpeculativeDraftTokens > 0
+        ? ctx.lastPerfSpeculativeDraftTokens
+        : null;
+    final speculativeAcceptedDraftTokens =
+        ctx.lastPerfSpeculativeAcceptedDraftTokens > 0
+        ? ctx.lastPerfSpeculativeAcceptedDraftTokens
+        : null;
+    final speculativeDraftMs = ctx.lastPerfSpeculativeDraftMs > 0
+        ? ctx.lastPerfSpeculativeDraftMs
+        : null;
+    final speculativeVerifyMs = ctx.lastPerfSpeculativeVerifyMs > 0
+        ? ctx.lastPerfSpeculativeVerifyMs
+        : null;
 
     return (
       loadMs: perf.t_load_ms,
       promptEvalMs: promptEvalMs,
       evalMs: evalMs,
       sampleMs: sampleMs,
+      decodeMs: decodeMs,
       promptEvalTokens: promptEvalTokens,
       evalTokens: evalTokens,
       sampleCount: sampleCount,
       reusedGraphs: perf.n_reused,
+      speculativeDraftTokens: speculativeDraftTokens,
+      speculativeAcceptedDraftTokens: speculativeAcceptedDraftTokens,
+      speculativeDraftMs: speculativeDraftMs,
+      speculativeVerifyMs: speculativeVerifyMs,
     );
   }
 
@@ -5700,6 +5810,7 @@ class _LazyGrammarConfig {
 
 class _MtpApi {
   final _LlamaDartMtpInitDart init;
+  final _LlamaDartMtpInitDart? initWithDraftModel;
   final _LlamaDartMtpFreeDart free;
   final _LlamaDartMtpGetDraftContextDart getDraftContext;
   final _LlamaDartMtpBeginDart begin;
@@ -5710,6 +5821,7 @@ class _MtpApi {
 
   const _MtpApi({
     required this.init,
+    required this.initWithDraftModel,
     required this.free,
     required this.getDraftContext,
     required this.begin,
@@ -5722,6 +5834,7 @@ class _MtpApi {
   factory _MtpApi.direct() {
     final api = _MtpApi(
       init: llama_dart_mtp_init,
+      initWithDraftModel: llama_dart_mtp_init_with_draft_model,
       free: llama_dart_mtp_free,
       getDraftContext: llama_dart_mtp_get_draft_context,
       begin: llama_dart_mtp_begin,
@@ -5738,6 +5851,7 @@ class _MtpApi {
     _llamadartWrapperMtpFree(nullptr.cast<llama_dart_mtp>());
     return _MtpApi(
       init: _llamadartWrapperMtpInit,
+      initWithDraftModel: _llamadartWrapperMtpInitWithDraftModel,
       free: _llamadartWrapperMtpFree,
       getDraftContext: _llamadartWrapperMtpGetDraftContext,
       begin: _llamadartWrapperMtpBegin,
@@ -5779,13 +5893,71 @@ class _MtpApi {
     }
   }
 
+  Pointer<llama_dart_mtp> initSession({
+    required Pointer<llama_model> targetModel,
+    required Pointer<llama_model>? draftModel,
+    required Pointer<llama_context> targetContext,
+    required llama_context_params contextParams,
+    required int draftTokenMax,
+    required int draftTokenMin,
+    required double minProbability,
+    required bool backendSampling,
+  }) {
+    final resolvedDraftModel = draftModel;
+    if (resolvedDraftModel == null) {
+      return init(
+        targetModel,
+        targetContext,
+        contextParams,
+        draftTokenMax,
+        draftTokenMin,
+        minProbability,
+        backendSampling,
+      );
+    }
+    final initWithDraft = initWithDraftModel;
+    if (initWithDraft == null) {
+      throw UnsupportedError(
+        'llama.cpp MTP draftModelPath requires a native libllamadart build '
+        'that exports llama_dart_mtp_init_with_draft_model.',
+      );
+    }
+    try {
+      return initWithDraft(
+        resolvedDraftModel,
+        targetContext,
+        contextParams,
+        draftTokenMax,
+        draftTokenMin,
+        minProbability,
+        backendSampling,
+      );
+    } on Object catch (error) {
+      throw UnsupportedError(
+        'llama.cpp MTP draftModelPath requires a native libllamadart build '
+        'that exports llama_dart_mtp_init_with_draft_model. Native lookup '
+        'failed: $error',
+      );
+    }
+  }
+
   static _MtpApi? tryLoad(DynamicLibrary library) {
     try {
+      _LlamaDartMtpInitDart? initWithDraftModel;
+      try {
+        initWithDraftModel = library
+            .lookupFunction<_LlamaDartMtpInitNative, _LlamaDartMtpInitDart>(
+              'llama_dart_mtp_init_with_draft_model',
+            );
+      } catch (_) {
+        initWithDraftModel = null;
+      }
       return _MtpApi(
         init: library
             .lookupFunction<_LlamaDartMtpInitNative, _LlamaDartMtpInitDart>(
               'llama_dart_mtp_init',
             ),
+        initWithDraftModel: initWithDraftModel,
         free: library
             .lookupFunction<_LlamaDartMtpFreeNative, _LlamaDartMtpFreeDart>(
               'llama_dart_mtp_free',
@@ -5981,17 +6153,27 @@ class _LlamaContextWrapper {
   double lastPerfPromptEvalMs = 0;
   double lastPerfEvalMs = 0;
   double lastPerfSampleMs = 0;
+  double lastPerfDecodeMs = 0;
+  double lastPerfSpeculativeDraftMs = 0;
+  double lastPerfSpeculativeVerifyMs = 0;
   int lastPerfPromptEvalTokens = 0;
   int lastPerfEvalTokens = 0;
   int lastPerfSampleCount = 0;
+  int lastPerfSpeculativeDraftTokens = 0;
+  int lastPerfSpeculativeAcceptedDraftTokens = 0;
   _LlamaContextWrapper(this.pointer, this._modelKeepAlive);
   void resetLastPerf() {
     lastPerfPromptEvalMs = 0;
     lastPerfEvalMs = 0;
     lastPerfSampleMs = 0;
+    lastPerfDecodeMs = 0;
+    lastPerfSpeculativeDraftMs = 0;
+    lastPerfSpeculativeVerifyMs = 0;
     lastPerfPromptEvalTokens = 0;
     lastPerfEvalTokens = 0;
     lastPerfSampleCount = 0;
+    lastPerfSpeculativeDraftTokens = 0;
+    lastPerfSpeculativeAcceptedDraftTokens = 0;
   }
 
   void dispose() {

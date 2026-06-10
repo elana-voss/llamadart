@@ -178,6 +178,10 @@ Map<String, Object?> _summarizeRuns(List<Map<String, Object?>> runs) {
   return {
     'wallTokensPerSecond': _numericSummary(runs, 'wallTokensPerSecond'),
     'decodeTokensPerSecond': _numericSummary(runs, 'decodeTokensPerSecond'),
+    'decodeOnlyTokensPerSecond': _numericSummary(
+      runs,
+      'decodeOnlyTokensPerSecond',
+    ),
     'decodeWithSamplingTokensPerSecond': _numericSummary(
       runs,
       'decodeWithSamplingTokensPerSecond',
@@ -185,10 +189,30 @@ Map<String, Object?> _summarizeRuns(List<Map<String, Object?>> runs) {
     'wallMilliseconds': _numericSummary(runs, 'wallMilliseconds'),
     'outputTokens': _numericSummary(runs, 'outputTokens'),
     'evalTokens': _numericSummary(runs, 'evalTokens'),
+    'speculativeAcceptanceRate': _numericSummary(
+      runs,
+      'speculativeAcceptanceRate',
+    ),
     'targetWallTokensPerSecond': _numericSummary(
       runs,
       'targetWallTokensPerSecond',
     ),
+  };
+}
+
+Map<String, Object?> _perfDiagnosticFields(BackendPerfContextData? perf) {
+  final decodeMs = perf?.decodeMs;
+  return {
+    'decodeMs': decodeMs,
+    'decodeOnlyTokensPerSecond':
+        perf == null || decodeMs == null || decodeMs <= 0
+        ? null
+        : perf.evalTokens / (decodeMs / 1000.0),
+    'speculativeDraftTokens': perf?.speculativeDraftTokens,
+    'speculativeAcceptedDraftTokens': perf?.speculativeAcceptedDraftTokens,
+    'speculativeAcceptanceRate': perf?.speculativeAcceptanceRate,
+    'speculativeDraftMs': perf?.speculativeDraftMs,
+    'speculativeVerifyMs': perf?.speculativeVerifyMs,
   };
 }
 
@@ -209,6 +233,9 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
   );
   final _llamaModelPathController = TextEditingController(
     text: const String.fromEnvironment('LLAMADART_MODEL'),
+  );
+  final _llamaDraftModelPathController = TextEditingController(
+    text: const String.fromEnvironment('LLAMADART_DRAFT_MODEL'),
   );
   final _promptController = TextEditingController(
     text: const String.fromEnvironment(
@@ -265,6 +292,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
   void dispose() {
     _modelPathController.dispose();
     _llamaModelPathController.dispose();
+    _llamaDraftModelPathController.dispose();
     _promptController.dispose();
     super.dispose();
   }
@@ -275,6 +303,9 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
     );
     final llamaModelPath = await resolveBenchmarkModelPathForApp(
       _llamaModelPathController.text,
+    );
+    final llamaDraftModelPath = await resolveBenchmarkModelPathForApp(
+      _llamaDraftModelPathController.text,
     );
     if (modelPath.isEmpty && llamaModelPath.isEmpty) {
       _append('Set LITERT_LM_MODEL and/or LLAMADART_MODEL.');
@@ -295,7 +326,12 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
     }
     if (llamaModelPath.isNotEmpty) {
       try {
-        await _runLlamaDartBenchmark(llamaModelPath);
+        await _runLlamaDartBenchmark(
+          llamaModelPath,
+          draftModelPath: llamaDraftModelPath.isEmpty
+              ? null
+              : llamaDraftModelPath,
+        );
       } catch (error, stackTrace) {
         _append('ERROR llamadart: $error');
         _append(stackTrace.toString());
@@ -390,6 +426,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
           'promptEvalMs': perf?.promptEvalMs,
           'evalMs': perf?.evalMs,
           'sampleMs': perf?.sampleMs,
+          ..._perfDiagnosticFields(perf),
           'prefillTokensPerSecond': perf == null || perf.promptEvalMs <= 0
               ? null
               : perf.promptEvalTokens / (perf.promptEvalMs / 1000.0),
@@ -423,6 +460,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
         'promptEvalMs': perf?.promptEvalMs,
         'evalMs': perf?.evalMs,
         'sampleMs': perf?.sampleMs,
+        ..._perfDiagnosticFields(perf),
         'prefillTokensPerSecond': perf == null || perf.promptEvalMs <= 0
             ? null
             : perf.promptEvalTokens / (perf.promptEvalMs / 1000.0),
@@ -468,7 +506,10 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
     };
   }
 
-  Future<void> _runLlamaDartBenchmark(String modelPath) async {
+  Future<void> _runLlamaDartBenchmark(
+    String modelPath, {
+    String? draftModelPath,
+  }) async {
     final engine = LlamaEngine(LlamaBackend());
     try {
       final backendPreference = resolveLlamaCppBenchmarkBackend(_llamaBackend);
@@ -476,6 +517,9 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
       _append('=== llamadart / llama.cpp ===');
       _append('Initializing llamadart:');
       _append('  model: $modelPath');
+      if (draftModelPath != null) {
+        _append('  draft model: $draftModelPath');
+      }
       _append('  backend: ${llamaCppBenchmarkBackendLabel(backendPreference)}');
       final loadSw = Stopwatch()..start();
       await engine.loadModel(
@@ -502,7 +546,9 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
                 maxTokens: _outputTokens,
                 seed: 1,
                 speculativeDecodingConfig: _speculative
-                    ? const SpeculativeDecodingConfig.mtp()
+                    ? SpeculativeDecodingConfig.mtp(
+                        draftModelPath: draftModelPath,
+                      )
                     : null,
               ),
             )
@@ -522,7 +568,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
             maxTokens: _outputTokens,
             seed: 1,
             speculativeDecodingConfig: _speculative
-                ? const SpeculativeDecodingConfig.mtp()
+                ? SpeculativeDecodingConfig.mtp(draftModelPath: draftModelPath)
                 : null,
           ),
         )) {
@@ -546,6 +592,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
           'promptEvalMs': perf?.promptEvalMs,
           'evalMs': perf?.evalMs,
           'sampleMs': perf?.sampleMs,
+          ..._perfDiagnosticFields(perf),
           'prefillTokensPerSecond': perf == null || perf.promptEvalMs <= 0
               ? null
               : perf.promptEvalTokens / (perf.promptEvalMs / 1000.0),
@@ -573,6 +620,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
         'requestedBackend': backendPreference.name,
         'backendName': backendName,
         'resolvedGpuLayers': resolvedGpuLayers,
+        'draftModelPath': draftModelPath,
         'targetDecodeTokens': _outputTokens,
         'speculativeDecoding': _speculative,
         'outputTokens': runsDetail.isEmpty
@@ -586,6 +634,7 @@ class _LiteRtLmBenchmarkAppState extends State<LiteRtLmBenchmarkApp> {
         'promptEvalMs': perf?.promptEvalMs,
         'evalMs': perf?.evalMs,
         'sampleMs': perf?.sampleMs,
+        ..._perfDiagnosticFields(perf),
         'prefillTokensPerSecond': perf == null || perf.promptEvalMs <= 0
             ? null
             : perf.promptEvalTokens / (perf.promptEvalMs / 1000.0),
