@@ -20,7 +20,8 @@ For canonical full release notes, use:
   `llamadart_native_runtimes`.
 - Added opt-in native `.litertlm` `ModelParams` for activation data type,
   prefill chunk size, parallel file-section loading, and Android NPU LiteRT
-  dispatch library directory, forwarding the pinned LiteRT-LM `v0.13.1`
+  dispatch library directory, forwarding the pinned LiteRT-LM
+  `v0.13.1-native.1`
   engine-settings C APIs while keeping defaults unchanged.
 - Extended the LiteRT-LM engine smoke tool with matching environment variables
   and documented the support decision for each candidate runtime knob.

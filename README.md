@@ -63,7 +63,7 @@ they ship:
 dependencies:
   llamadart: ^0.8.0
   llamadart_llama_cpp_flutter: ^0.0.2 # GGUF / llama.cpp
-  llamadart_litert_lm_flutter: ^0.0.1 # .litertlm / LiteRT-LM
+  llamadart_litert_lm_flutter: ^0.0.2 # .litertlm / LiteRT-LM
 ```
 
 The companion packages are published independently from the `packages/`
@@ -766,9 +766,9 @@ Current pinned runtime artifacts:
 | Runtime path | Published artifact |
 |--------------|--------------------|
 | Native llama.cpp / GGUF | `leehack/llamadart-native@b9587` |
-| Native LiteRT-LM / `.litertlm` | `leehack/litert-lm-native@v0.13.1` |
+| Native LiteRT-LM / `.litertlm` | `leehack/litert-lm-native@v0.13.1-native.1` |
 | Apple SPM llama.cpp / GGUF | `llamadart_llama_cpp_flutter` pins `leehack/llamadart-native@b9587` Apple XCFramework |
-| Apple SPM LiteRT-LM / `.litertlm` | `llamadart_litert_lm_flutter` pins `leehack/litert-lm-native@v0.13.1` Apple XCFrameworks |
+| Apple SPM LiteRT-LM / `.litertlm` | `llamadart_litert_lm_flutter` pins `leehack/litert-lm-native@v0.13.1-native.1` Apple XCFrameworks |
 | Web llama.cpp / GGUF | `leehack/llama-web-bridge-assets@v0.1.16` |
 | Web LiteRT-LM / `.litertlm` | App-provided `@litert-lm/core` module URL; the chat app defaults to jsDelivr `@litert-lm/core/+esm` |
 

@@ -8,8 +8,8 @@ backend-module configuration for
 `llamadart`.
 
 The native-assets hook currently pins `llamadart-native` tag `b9587` and
-`litert-lm-native` release `v0.13.1` (`hook/build.dart`). Apps can override the
-llama.cpp native GitHub source with
+`litert-lm-native` release `v0.13.1-native.1` (`hook/build.dart`). Apps can
+override the llama.cpp native GitHub source with
 `hooks.user_defines.llamadart.llamadart_native_tag` and
 `hooks.user_defines.llamadart.llamadart_native_repository`, or use a local
 bundle source with `hooks.user_defines.llamadart.llamadart_native_path`. Module
@@ -112,7 +112,7 @@ Explicitly selecting `litert_lm` for a target without a pinned LiteRT-LM
 runtime fails during the build hook instead of producing an app that cannot
 load `.litertlm` models.
 
-## LiteRT-LM runtime coverage (`v0.13.1`)
+## LiteRT-LM runtime coverage (`v0.13.1-native.1`)
 
 | Platform target | LiteRT-LM bundle key | Selectable backends | Status |
 | --- | --- | --- | --- |
@@ -142,7 +142,7 @@ not be treated as a multi-turn `ChatSession` or tool-calling backend yet.
 instead of silently ignoring llama.cpp-only settings.
 
 Native LiteRT-LM exposes four advanced runtime controls through `ModelParams`.
-All are opt-in; `null` keeps the pinned `v0.13.1` runtime default.
+All are opt-in; `null` keeps the pinned `v0.13.1-native.1` runtime default.
 
 | Native C API | Dart field | Support decision |
 | --- | --- | --- |

@@ -1,3 +1,10 @@
+## Unreleased
+
+* Fixed docs references that still pointed at
+  `llamadart_litert_lm_flutter` `0.0.1` and
+  the pre-`native.1` LiteRT-LM release after the 0.8.0 native pin sync moved
+  LiteRT-LM Apple/runtime artifacts to `v0.13.1-native.1`.
+
 ## 0.8.0
 
 * **Flutter Apple runtime packaging**:
@@ -49,8 +56,8 @@
   * Added opt-in native `.litertlm` `ModelParams` for
     `liteRtLmActivationDataType`, `liteRtLmPrefillChunkSize`,
     `liteRtLmParallelFileSectionLoading`, and `liteRtLmDispatchLibDir`,
-    forwarding the pinned LiteRT-LM `v0.13.1` engine-settings C APIs while
-    keeping defaults unchanged.
+    forwarding the pinned LiteRT-LM `v0.13.1-native.1` engine-settings C APIs
+    while keeping defaults unchanged.
   * Extended the LiteRT-LM engine smoke tool with matching environment
     variables so real-model runs can validate load time, prefill throughput,
     decode throughput, and selected runtime settings.
