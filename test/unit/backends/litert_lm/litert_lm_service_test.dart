@@ -4,6 +4,7 @@ library;
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:llamadart/src/backends/litert_lm/litert_lm_service.dart';
 import 'package:llamadart/src/backends/litert_lm/litert_lm_runtime.dart';
@@ -692,6 +693,410 @@ void main() {
   });
 
   test(
+    'routes native chat media parts through LiteRT-LM message JSON',
+    () async {
+      final fakeClient = _FakeLiteRtLmRuntimeClient();
+      final service = LiteRtLmService(clientFactory: () => fakeClient);
+      final imageFile = File('${tempDir.path}/image.png');
+      await imageFile.writeAsBytes(const <int>[
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+      ]);
+
+      try {
+        final modelHandle = await service.loadModel(
+          modelFile.path,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+        final contextHandle = service.createContext(
+          modelHandle,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+
+        final chunksFuture = service.generateChat(contextHandle, [
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: [
+              const LlamaTextContent('Describe this image and audio.'),
+              LlamaImageContent(path: imageFile.path),
+              LlamaAudioContent(
+                bytes: Uint8List.fromList(const <int>[1, 2, 3]),
+              ),
+            ],
+          ),
+        ], const GenerationParams(maxTokens: 8)).toList();
+
+        await fakeClient.generateStarted.future;
+        fakeClient.generated.add('ok');
+        await fakeClient.generated.close();
+
+        expect(await chunksFuture, [utf8.encode('ok')]);
+        expect(fakeClient.lastMaxNumImages, 1);
+        expect(fakeClient.lastVisionBackend, 'cpu');
+        expect(fakeClient.lastAudioBackend, 'cpu');
+        expect(fakeClient.lastVisualTokenBudget, 280);
+        expect(fakeClient.createConversationCount, 1);
+        expect(fakeClient.generateCount, 1);
+
+        final message =
+            jsonDecode(fakeClient.lastMessageJson!) as Map<String, dynamic>;
+        expect(message['role'], 'user');
+        expect(message['content'], [
+          {'type': 'text', 'text': 'Describe this image and audio.'},
+          {'type': 'image', 'path': imageFile.path},
+          {
+            'type': 'audio',
+            'blob': base64Encode(const <int>[1, 2, 3]),
+          },
+        ]);
+      } finally {
+        service.dispose();
+      }
+    },
+  );
+
+  test(
+    'routes encoded image bytes and audio file paths through message JSON',
+    () async {
+      final fakeClient = _FakeLiteRtLmRuntimeClient();
+      final service = LiteRtLmService(clientFactory: () => fakeClient);
+      final audioFile = File('${tempDir.path}/audio.wav');
+      await audioFile.writeAsBytes(const <int>[
+        0x52,
+        0x49,
+        0x46,
+        0x46,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x57,
+        0x41,
+        0x56,
+        0x45,
+      ]);
+
+      try {
+        final modelHandle = await service.loadModel(
+          modelFile.path,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+        final contextHandle = service.createContext(
+          modelHandle,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+
+        final imageBytes = Uint8List.fromList(const <int>[1, 2, 3, 4]);
+        final chunksFuture = service.generateChat(contextHandle, [
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: [
+              const LlamaTextContent('Describe this image and audio.'),
+              LlamaImageContent(bytes: imageBytes),
+              LlamaAudioContent(path: audioFile.path),
+            ],
+          ),
+        ], const GenerationParams(maxTokens: 8)).toList();
+
+        await fakeClient.generateStarted.future;
+        fakeClient.generated.add('ok');
+        await fakeClient.generated.close();
+
+        expect(await chunksFuture, [utf8.encode('ok')]);
+        expect(fakeClient.lastMaxNumImages, 1);
+        expect(fakeClient.lastVisionBackend, 'cpu');
+        expect(fakeClient.lastAudioBackend, 'cpu');
+        expect(fakeClient.lastVisualTokenBudget, 280);
+
+        final message =
+            jsonDecode(fakeClient.lastMessageJson!) as Map<String, dynamic>;
+        expect(message['content'], [
+          {'type': 'text', 'text': 'Describe this image and audio.'},
+          {'type': 'image', 'blob': base64Encode(imageBytes)},
+          {'type': 'audio', 'path': audioFile.path},
+        ]);
+      } finally {
+        service.dispose();
+      }
+    },
+  );
+
+  test(
+    'rejects unsupported native chat media shapes before runtime init',
+    () async {
+      final fakeClient = _FakeLiteRtLmRuntimeClient();
+      final service = LiteRtLmService(clientFactory: () => fakeClient);
+
+      try {
+        final modelHandle = await service.loadModel(
+          modelFile.path,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+        final contextHandle = service.createContext(
+          modelHandle,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+
+        Future<void> expectMediaError(
+          List<LlamaContentPart> content,
+          Matcher matcher,
+        ) {
+          return expectLater(
+            service.generateChat(contextHandle, [
+              LlamaChatMessage.withContent(
+                role: LlamaChatRole.user,
+                content: content,
+              ),
+            ], const GenerationParams()),
+            emitsError(matcher),
+          );
+        }
+
+        await expectMediaError(
+          const [LlamaImageContent(path: '')],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('must not be empty'),
+          ),
+        );
+
+        await expectMediaError(
+          [LlamaImageContent(path: '${tempDir.path}/missing.png')],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('image file does not exist'),
+          ),
+        );
+
+        await expectMediaError(
+          [LlamaImageContent(bytes: Uint8List(0))],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('must not be empty'),
+          ),
+        );
+
+        await expectLater(
+          service.generateChat(contextHandle, const [
+            LlamaChatMessage.withContent(
+              role: LlamaChatRole.user,
+              content: [LlamaImageContent(url: 'https://example.com/a.png')],
+            ),
+          ], const GenerationParams()),
+          emitsError(
+            isA<UnsupportedError>().having(
+              (error) => error.message.toString(),
+              'message',
+              contains('remote image URLs'),
+            ),
+          ),
+        );
+
+        await expectMediaError(
+          const [LlamaImageContent()],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('image content must provide'),
+          ),
+        );
+
+        await expectMediaError(
+          const [LlamaAudioContent(path: '')],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('must not be empty'),
+          ),
+        );
+
+        await expectMediaError(
+          [LlamaAudioContent(path: '${tempDir.path}/missing.wav')],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('audio file does not exist'),
+          ),
+        );
+
+        await expectMediaError(
+          [LlamaAudioContent(bytes: Uint8List(0))],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('must not be empty'),
+          ),
+        );
+
+        await expectLater(
+          service.generateChat(contextHandle, [
+            LlamaChatMessage.withContent(
+              role: LlamaChatRole.user,
+              content: [
+                LlamaImageContent(
+                  bytes: Uint8List.fromList(const <int>[0, 0, 0]),
+                  width: 1,
+                  height: 1,
+                ),
+              ],
+            ),
+          ], const GenerationParams()),
+          emitsError(
+            isA<UnsupportedError>().having(
+              (error) => error.message.toString(),
+              'message',
+              contains('raw RGB image bytes'),
+            ),
+          ),
+        );
+
+        await expectLater(
+          service.generateChat(contextHandle, [
+            LlamaChatMessage.withContent(
+              role: LlamaChatRole.user,
+              content: [
+                LlamaAudioContent(samples: Float32List.fromList([0.1])),
+              ],
+            ),
+          ], const GenerationParams()),
+          emitsError(
+            isA<UnsupportedError>().having(
+              (error) => error.message.toString(),
+              'message',
+              contains('raw PCM audio samples'),
+            ),
+          ),
+        );
+
+        await expectMediaError(
+          const [LlamaAudioContent()],
+          isA<ArgumentError>().having(
+            (error) => error.toString(),
+            'message',
+            contains('audio content must provide'),
+          ),
+        );
+
+        expect(fakeClient.initializeStarted.isCompleted, isFalse);
+        expect(fakeClient.createConversationCount, 0);
+        expect(fakeClient.generateCount, 0);
+      } finally {
+        service.dispose();
+      }
+    },
+  );
+
+  test(
+    'rejects unsupported native chat media message roles and parts',
+    () async {
+      final fakeClient = _FakeLiteRtLmRuntimeClient();
+      final service = LiteRtLmService(clientFactory: () => fakeClient);
+      final imageFile = File('${tempDir.path}/image.png');
+      await imageFile.writeAsBytes(const <int>[
+        0x89,
+        0x50,
+        0x4e,
+        0x47,
+        0x0d,
+        0x0a,
+        0x1a,
+        0x0a,
+      ]);
+
+      try {
+        final modelHandle = await service.loadModel(
+          modelFile.path,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+        final contextHandle = service.createContext(
+          modelHandle,
+          const ModelParams(preferredBackend: GpuBackend.cpu),
+        );
+
+        Future<void> expectMediaError(
+          List<LlamaChatMessage> messages,
+          String expectedMessage,
+        ) {
+          return expectLater(
+            service.generateChat(
+              contextHandle,
+              messages,
+              const GenerationParams(),
+            ),
+            emitsError(
+              isA<UnsupportedError>().having(
+                (error) => error.message.toString(),
+                'message',
+                contains(expectedMessage),
+              ),
+            ),
+          );
+        }
+
+        await expectMediaError([
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.system,
+            content: [LlamaImageContent(path: imageFile.path)],
+          ),
+          const LlamaChatMessage.fromText(
+            role: LlamaChatRole.user,
+            text: 'hello',
+          ),
+        ], 'system messages');
+
+        await expectMediaError([
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: [
+              LlamaImageContent(path: imageFile.path),
+              const LlamaThinkingContent('thinking'),
+            ],
+          ),
+        ], 'thinking content');
+
+        await expectMediaError([
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: [
+              LlamaImageContent(path: imageFile.path),
+              const LlamaToolCallContent(
+                name: 'lookup',
+                arguments: <String, Object?>{},
+                rawJson: '{}',
+              ),
+            ],
+          ),
+        ], 'tool-call content');
+
+        await expectMediaError([
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: [
+              LlamaImageContent(path: imageFile.path),
+              const LlamaToolResultContent(name: 'lookup', result: 'ok'),
+            ],
+          ),
+        ], 'tool-result content');
+
+        expect(fakeClient.initializeStarted.isCompleted, isFalse);
+        expect(fakeClient.createConversationCount, 0);
+        expect(fakeClient.generateCount, 0);
+      } finally {
+        service.dispose();
+      }
+    },
+  );
+
+  test(
     'allows text parts already represented in the rendered prompt',
     () async {
       final fakeClient = _FakeLiteRtLmRuntimeClient();
@@ -1173,6 +1578,73 @@ void main() {
         expect(firstClient.lastSpeculativeDecoding, isTrue);
         expect(firstClient.disposeCount, 1);
         expect(secondClient.lastSpeculativeDecoding, isFalse);
+        expect(nextClient, 2);
+      } finally {
+        service.dispose();
+      }
+    },
+  );
+
+  test(
+    'recreates LiteRT-LM client when audio media needs an executor',
+    () async {
+      final firstClient = _FakeLiteRtLmRuntimeClient();
+      final secondClient = _FakeLiteRtLmRuntimeClient();
+      final clients = <_FakeLiteRtLmRuntimeClient>[firstClient, secondClient];
+      var nextClient = 0;
+      final service = LiteRtLmService(
+        clientFactory: () => clients[nextClient++],
+      );
+
+      try {
+        final modelHandle = await service.loadModel(
+          modelFile.path,
+          const ModelParams(
+            contextSize: 3072,
+            preferredBackend: GpuBackend.cpu,
+          ),
+        );
+        final contextHandle = service.createContext(
+          modelHandle,
+          const ModelParams(
+            contextSize: 3072,
+            preferredBackend: GpuBackend.cpu,
+          ),
+        );
+
+        final firstChunks = service
+            .generate(
+              contextHandle,
+              'hello',
+              const GenerationParams(maxTokens: 7),
+            )
+            .toList();
+        await firstClient.generateStarted.future;
+        firstClient.generated.add('first');
+        await firstClient.generated.close();
+        await firstChunks;
+
+        final secondChunks = service.generateChat(contextHandle, [
+          LlamaChatMessage.withContent(
+            role: LlamaChatRole.user,
+            content: [
+              const LlamaTextContent('Transcribe this.'),
+              LlamaAudioContent(
+                bytes: Uint8List.fromList(const <int>[1, 2, 3]),
+              ),
+            ],
+          ),
+        ], const GenerationParams(maxTokens: 7)).toList();
+        await secondClient.generateStarted.future;
+        secondClient.generated.add('second');
+        await secondClient.generated.close();
+        await secondChunks;
+
+        expect(firstClient.disposeCount, 1);
+        expect(secondClient.lastVisionBackend, isNull);
+        expect(secondClient.lastAudioBackend, 'cpu');
+        expect(secondClient.lastMaxNumImages, isNull);
+        expect(secondClient.lastVisualTokenBudget, isNull);
         expect(nextClient, 2);
       } finally {
         service.dispose();
@@ -1781,8 +2253,11 @@ class _FakeLiteRtLmRuntimeClient extends LiteRtLmRuntimeClient {
   final Object? initializeError;
   String? lastModelPath;
   String? lastBackend;
+  String? lastVisionBackend;
+  String? lastAudioBackend;
   int? lastMaxTokens;
   int? lastOutputTokens;
+  int? lastMaxNumImages;
   String? lastCacheDir;
   bool? lastSpeculativeDecoding;
   int? lastMinLogLevel;
@@ -1805,6 +2280,7 @@ class _FakeLiteRtLmRuntimeClient extends LiteRtLmRuntimeClient {
   List<int>? lastDetokenizeTokens;
   String? lastMessageJson;
   Map<String, dynamic>? lastMessageExtraContext;
+  int? lastVisualTokenBudget;
   List<int> tokenizeResult = const <int>[];
   String detokenizeResult = '';
   LiteRtLmRuntimeMetrics? metrics;
@@ -1819,9 +2295,12 @@ class _FakeLiteRtLmRuntimeClient extends LiteRtLmRuntimeClient {
   Future<void> initialize({
     required String modelPath,
     String backend = 'gpu',
+    String? visionBackend,
+    String? audioBackend,
     int maxTokens = 4096,
     int outputTokens = 256,
     int? prefillTokens,
+    int? maxNumImages,
     String? cacheDir,
     bool speculativeDecoding = true,
     int minLogLevel = 3,
@@ -1832,8 +2311,11 @@ class _FakeLiteRtLmRuntimeClient extends LiteRtLmRuntimeClient {
   }) {
     lastModelPath = modelPath;
     lastBackend = backend;
+    lastVisionBackend = visionBackend;
+    lastAudioBackend = audioBackend;
     lastMaxTokens = maxTokens;
     lastOutputTokens = outputTokens;
+    lastMaxNumImages = maxNumImages;
     lastCacheDir = cacheDir;
     lastSpeculativeDecoding = speculativeDecoding;
     lastMinLogLevel = minLogLevel;
@@ -1922,12 +2404,14 @@ class _FakeLiteRtLmRuntimeClient extends LiteRtLmRuntimeClient {
   Stream<String> generateMessageJson(
     String messageJson, {
     Map<String, dynamic>? extraContext,
+    int? visualTokenBudget,
   }) {
     _checkNotDisposed();
     lastMessageJson = messageJson;
     lastMessageExtraContext = extraContext == null
         ? null
         : Map<String, dynamic>.from(extraContext);
+    lastVisualTokenBudget = visualTokenBudget;
     generateCount += 1;
     if (!generateStarted.isCompleted) {
       generateStarted.complete();

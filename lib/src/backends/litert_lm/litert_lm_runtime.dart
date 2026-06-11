@@ -415,6 +415,7 @@ final class _BlockingSendMessageRequest {
     required this.conversationAddress,
     required this.messageJson,
     this.extraContextJson,
+    this.visualTokenBudget,
   });
 
   final String libraryPath;
@@ -422,6 +423,7 @@ final class _BlockingSendMessageRequest {
   final int conversationAddress;
   final String messageJson;
   final String? extraContextJson;
+  final int? visualTokenBudget;
 }
 
 /// Low-level native LiteRT-LM runtime client.
@@ -458,12 +460,19 @@ class LiteRtLmRuntimeClient {
   Pointer<_LiteRtLmConversation>? _conversation;
 
   /// Initializes the native LiteRT-LM engine for a `.litertlm` model bundle.
+  ///
+  /// [visionBackend] and [audioBackend] enable the native media executors for
+  /// multimodal bundles. [maxNumImages] configures the image preprocessor
+  /// capacity for conversations that may include image inputs.
   Future<void> initialize({
     required String modelPath,
     String backend = 'gpu',
+    String? visionBackend,
+    String? audioBackend,
     int maxTokens = 4096,
     int outputTokens = 256,
     int? prefillTokens,
+    int? maxNumImages,
     String? cacheDir,
     bool speculativeDecoding = true,
     int minLogLevel = 3,
@@ -489,6 +498,13 @@ class LiteRtLmRuntimeClient {
         'must be positive when provided',
       );
     }
+    if (maxNumImages != null && maxNumImages <= 0) {
+      throw ArgumentError.value(
+        maxNumImages,
+        'maxNumImages',
+        'must be positive when provided',
+      );
+    }
     if (prefillChunkSize != null && prefillChunkSize <= 0) {
       throw ArgumentError.value(
         prefillChunkSize,
@@ -504,6 +520,15 @@ class LiteRtLmRuntimeClient {
       );
     }
     final resolvedBackend = _normalizeLiteRtLmRuntimeBackend(backend);
+    final resolvedVisionBackend = visionBackend == null
+        ? null
+        : _normalizeLiteRtLmRuntimeBackend(
+            visionBackend,
+            name: 'visionBackend',
+          );
+    final resolvedAudioBackend = audioBackend == null
+        ? null
+        : _normalizeLiteRtLmRuntimeBackend(audioBackend, name: 'audioBackend');
 
     _ensureLibrariesLoaded();
     final bindings = _bindings!;
@@ -514,6 +539,12 @@ class LiteRtLmRuntimeClient {
 
     final modelPathPtr = modelPath.toNativeUtf8(allocator: calloc);
     final backendPtr = resolvedBackend.toNativeUtf8(allocator: calloc);
+    final visionBackendPtr = resolvedVisionBackend?.toNativeUtf8(
+      allocator: calloc,
+    );
+    final audioBackendPtr = resolvedAudioBackend?.toNativeUtf8(
+      allocator: calloc,
+    );
     final cacheDirPtr = cacheDir?.toNativeUtf8(allocator: calloc);
     final dispatchLibDirPtr = dispatchLibDir?.toNativeUtf8(allocator: calloc);
     Pointer<_LiteRtLmEngineSettings> settings = nullptr;
@@ -522,8 +553,8 @@ class LiteRtLmRuntimeClient {
       settings = bindings.engineSettingsCreate(
         modelPathPtr.cast(),
         backendPtr.cast(),
-        nullptr,
-        nullptr,
+        visionBackendPtr?.cast() ?? nullptr,
+        audioBackendPtr?.cast() ?? nullptr,
       );
       if (settings == nullptr) {
         throw StateError('litert_lm_engine_settings_create returned null');
@@ -535,6 +566,9 @@ class LiteRtLmRuntimeClient {
         settings,
         speculativeDecoding,
       );
+      if (maxNumImages != null) {
+        bindings.engineSettingsSetMaxNumImages(settings, maxNumImages);
+      }
       if (parallelFileSectionLoading != null) {
         bindings.engineSettingsSetParallelFileSectionLoading(
           settings,
@@ -603,6 +637,12 @@ class LiteRtLmRuntimeClient {
       }
       calloc.free(modelPathPtr);
       calloc.free(backendPtr);
+      if (visionBackendPtr != null) {
+        calloc.free(visionBackendPtr);
+      }
+      if (audioBackendPtr != null) {
+        calloc.free(audioBackendPtr);
+      }
       if (cacheDirPtr != null) {
         calloc.free(cacheDirPtr);
       }
@@ -811,10 +851,21 @@ class LiteRtLmRuntimeClient {
   }
 
   /// Streams generated text by sending a native LiteRT-LM message JSON object.
+  ///
+  /// [visualTokenBudget] configures the native image-token budget for
+  /// multimodal messages.
   Stream<String> generateMessageJson(
     String messageJson, {
     Map<String, dynamic>? extraContext,
+    int? visualTokenBudget,
   }) {
+    if (visualTokenBudget != null && visualTokenBudget <= 0) {
+      throw ArgumentError.value(
+        visualTokenBudget,
+        'visualTokenBudget',
+        'must be positive when provided',
+      );
+    }
     // Upstream stream callback strings are only valid during the native call.
     // Dart listener callbacks run later, so streaming requires StreamProxy to
     // copy those strings across the thread/isolate boundary.
@@ -825,17 +876,20 @@ class LiteRtLmRuntimeClient {
       return _generateBlockingMessageJson(
         messageJson,
         extraContextJson: extraContextJson,
+        visualTokenBudget: visualTokenBudget,
       );
     }
     return _generateStreamingMessageJson(
       messageJson,
       extraContextJson: extraContextJson,
+      visualTokenBudget: visualTokenBudget,
     );
   }
 
   Stream<String> _generateBlockingMessageJson(
     String messageJson, {
     String? extraContextJson,
+    int? visualTokenBudget,
   }) {
     final conversation = _requireConversation();
     final liteRtLmLibraryPath = _liteRtLmLibraryPath!;
@@ -846,6 +900,7 @@ class LiteRtLmRuntimeClient {
       conversationAddress: conversation.address,
       messageJson: messageJson,
       extraContextJson: extraContextJson,
+      visualTokenBudget: visualTokenBudget,
     );
 
     unawaited(() async {
@@ -878,6 +933,7 @@ class LiteRtLmRuntimeClient {
   Stream<String> _generateStreamingMessageJson(
     String messageJson, {
     String? extraContextJson,
+    int? visualTokenBudget,
   }) {
     final bindings = _requireBindings();
     final conversation = _requireConversation();
@@ -999,6 +1055,11 @@ class LiteRtLmRuntimeClient {
           'litert_lm_conversation_optional_args_create returned null',
         );
       }
+      _setConversationOptionalArgs(
+        bindings,
+        optionalArgs,
+        visualTokenBudget: visualTokenBudget,
+      );
 
       final rc = bindings.conversationSendMessageStream(
         conversation,
@@ -1638,12 +1699,15 @@ class LiteRtLmRuntimeClient {
   }
 }
 
-String _normalizeLiteRtLmRuntimeBackend(String backend) {
+String _normalizeLiteRtLmRuntimeBackend(
+  String backend, {
+  String name = 'backend',
+}) {
   final normalized = backend.trim().toLowerCase();
   if (normalized == 'cpu' || normalized == 'gpu' || normalized == 'npu') {
     return normalized;
   }
-  throw ArgumentError.value(backend, 'backend', 'must be cpu, gpu, or npu');
+  throw ArgumentError.value(backend, name, 'must be cpu, gpu, or npu');
 }
 
 String _messageJson(String text) {
@@ -1670,6 +1734,19 @@ String _systemMessageJson(String textOrJson) {
       {'type': 'text', 'text': textOrJson},
     ],
   });
+}
+
+void _setConversationOptionalArgs(
+  _LiteRtLmBindings bindings,
+  Pointer<_LiteRtLmConversationOptionalArgs> optionalArgs, {
+  int? visualTokenBudget,
+}) {
+  if (visualTokenBudget != null) {
+    bindings.conversationOptionalArgsSetVisualTokenBudget(
+      optionalArgs,
+      visualTokenBudget,
+    );
+  }
 }
 
 Future<String> _runBlockingSendMessageInIsolate(
@@ -1701,6 +1778,11 @@ String _runBlockingSendMessage(_BlockingSendMessageRequest request) {
           'litert_lm_conversation_optional_args_create returned null',
         );
       }
+      _setConversationOptionalArgs(
+        bindings,
+        optionalArgs,
+        visualTokenBudget: request.visualTokenBudget,
+      );
 
       final response = bindings.conversationSendMessage(
         conversation,
@@ -1932,6 +2014,12 @@ class _LiteRtLmBindings {
         Void Function(Pointer<_LiteRtLmEngineSettings>, Int),
         void Function(Pointer<_LiteRtLmEngineSettings>, int)
       >('litert_lm_engine_settings_set_num_decode_tokens');
+
+  late final engineSettingsSetMaxNumImages = _library
+      .lookupFunction<
+        Void Function(Pointer<_LiteRtLmEngineSettings>, Int),
+        void Function(Pointer<_LiteRtLmEngineSettings>, int)
+      >('litert_lm_engine_settings_set_max_num_images');
 
   late final engineSettingsSetEnableSpeculativeDecoding = _library
       .lookupFunction<
@@ -2182,6 +2270,12 @@ class _LiteRtLmBindings {
         Void Function(Pointer<_LiteRtLmConversationOptionalArgs>),
         void Function(Pointer<_LiteRtLmConversationOptionalArgs>)
       >('litert_lm_conversation_optional_args_delete');
+
+  late final conversationOptionalArgsSetVisualTokenBudget = _library
+      .lookupFunction<
+        Void Function(Pointer<_LiteRtLmConversationOptionalArgs>, Int),
+        void Function(Pointer<_LiteRtLmConversationOptionalArgs>, int)
+      >('litert_lm_conversation_optional_args_set_visual_token_budget');
 
   late final conversationSendMessage = _library
       .lookupFunction<

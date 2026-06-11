@@ -151,9 +151,8 @@ backend, not the registry:
   Dart-rendered prompt string.
 - **The Dart template path remains the compatibility fallback.** The engine
   still renders prompts in Dart for web LiteRT-LM, custom template inspection
-  through `chatTemplate(...)`, multimodal messages, required tool-choice,
-  parallel tool calls, and any backend that does not expose native structured
-  chat generation.
+  through `chatTemplate(...)`, required tool-choice, parallel tool calls, and
+  any backend that does not expose native structured chat generation.
 
 - **Thinking is reassembled from a channel stream.** The native runtime streams
   reasoning and the answer on separate channels — thought as
@@ -169,6 +168,13 @@ backend, not the registry:
   active delegate, so the engine drops the grammar and tool calls are parsed
   best-effort from the model output. Gemma 4 emits no grammar, so it is
   unaffected.
+- **Native media parts use LiteRT-LM's conversation message JSON.** When
+  `LlamaImageContent` or `LlamaAudioContent` reaches the native LiteRT-LM
+  backend, llamadart sends matching `type: image` / `type: audio` message items
+  with a local `path` or base64 `blob` through the native Conversation API. The
+  native model data processor then renders the bundle template and performs
+  image/audio preprocessing. This is separate from the llama.cpp `mmproj`
+  lifecycle.
 
 > The web backend (`@litert-lm/core`) uses a separate response path and does not
 > share the native Conversation API or channel reassembly; web thinking remains

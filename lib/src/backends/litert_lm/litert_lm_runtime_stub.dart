@@ -71,9 +71,12 @@ class LiteRtLmRuntimeClient {
   Future<void> initialize({
     required String modelPath,
     String backend = 'gpu',
+    String? visionBackend,
+    String? audioBackend,
     int maxTokens = 4096,
     int outputTokens = 256,
     int? prefillTokens,
+    int? maxNumImages,
     String? cacheDir,
     bool speculativeDecoding = true,
     int minLogLevel = 3,
@@ -124,6 +127,7 @@ class LiteRtLmRuntimeClient {
   Stream<String> generateMessageJson(
     String messageJson, {
     Map<String, dynamic>? extraContext,
+    int? visualTokenBudget,
   }) {
     throw UnsupportedError('LiteRT-LM runtime requires a native platform.');
   }

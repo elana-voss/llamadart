@@ -248,9 +248,20 @@ class NativeChatMockBackend extends MockLlamaBackend
           'tokenizer.chat_template':
               '{{ bos_token }}{% for message in messages %}'
               '{% if message["role"] == "user" %}'
-              '{{ "user: " + message["content"] }}'
+              '{{ "user: " }}'
+              '{% if message["content"] is string %}'
+              '{{ message["content"] }}'
+              '{% elif message["content"] is sequence and message["content"] is not string %}'
+              '{% for part in message["content"] %}'
+              '{% if part["type"] == "text" %}{{ part["text"] }}'
+              '{% elif part["type"] == "image" %}{{ "<image>" }}'
+              '{% elif part["type"] == "audio" %}{{ "<audio>" }}'
+              '{% endif %}{% endfor %}{% endif %}'
               '{% elif message["role"] == "assistant" %}'
-              '{{ "assistant: " + message["content"] }}'
+              '{{ "assistant: " }}'
+              '{% if message["content"] is string %}'
+              '{{ message["content"] }}'
+              '{% endif %}'
               '{% endif %}{% endfor %}'
               '{% if add_generation_prompt %}{{ "assistant: " }}{% endif %}',
         },
@@ -1157,6 +1168,39 @@ void main() {
           expect(
             nativeBackend.lastNativeMessages?.map((message) => message.role),
             [LlamaChatRole.assistant, LlamaChatRole.tool, LlamaChatRole.user],
+          );
+        } finally {
+          await nativeEngine.dispose();
+        }
+      },
+    );
+
+    test(
+      'create keeps media messages on native structured chat path',
+      () async {
+        final nativeBackend = NativeChatMockBackend()
+          ..generationText = 'native response';
+        final nativeEngine = LlamaEngine(nativeBackend);
+
+        try {
+          await nativeEngine.loadModel('gemma-4-E2B-it.litertlm');
+
+          await nativeEngine.create(const [
+            LlamaChatMessage.withContent(
+              role: LlamaChatRole.user,
+              content: [
+                LlamaTextContent('Describe this image.'),
+                LlamaImageContent(path: '/tmp/image.png'),
+              ],
+            ),
+          ]).drain();
+
+          expect(nativeBackend.nativeGenerateChatCalls, 1);
+          expect(nativeBackend.lastGenerationPrompt, isNull);
+          expect(
+            nativeBackend.lastNativeMessages?.single.parts
+                .whereType<LlamaImageContent>(),
+            hasLength(1),
           );
         } finally {
           await nativeEngine.dispose();

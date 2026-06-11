@@ -343,6 +343,16 @@ void main() {
         ),
       );
       expect(
+        client.initialize(modelPath: 'model.litertlm', maxNumImages: 0),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.name,
+            'name',
+            'maxNumImages',
+          ),
+        ),
+      );
+      expect(
         client.initialize(modelPath: 'model.litertlm', prefillChunkSize: 0),
         throwsA(
           isA<ArgumentError>().having(
@@ -376,8 +386,46 @@ void main() {
           isA<ArgumentError>().having((error) => error.name, 'name', 'backend'),
         ),
       );
+      expect(
+        client.initialize(modelPath: 'model.litertlm', visionBackend: ' dsp '),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.name,
+            'name',
+            'visionBackend',
+          ),
+        ),
+      );
+      expect(
+        client.initialize(modelPath: 'model.litertlm', audioBackend: ' dsp '),
+        throwsA(
+          isA<ArgumentError>().having(
+            (error) => error.name,
+            'name',
+            'audioBackend',
+          ),
+        ),
+      );
     },
   );
+
+  test('LiteRtLmRuntimeClient validates send optional args', () {
+    final client = LiteRtLmRuntimeClient();
+
+    expect(
+      () => client.generateMessageJson(
+        '{"role":"user","content":[{"type":"text","text":"hi"}]}',
+        visualTokenBudget: 0,
+      ),
+      throwsA(
+        isA<ArgumentError>().having(
+          (error) => error.name,
+          'name',
+          'visualTokenBudget',
+        ),
+      ),
+    );
+  });
 
   test('LiteRtLmRuntimeClient validates benchmark loop counts', () {
     final client = LiteRtLmRuntimeClient();

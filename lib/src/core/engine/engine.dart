@@ -2057,11 +2057,7 @@ class LlamaEngine {
     if (toolChoice == ToolChoice.required || parallelToolCalls) {
       return false;
     }
-    return messages
-        .expand((message) => message.parts)
-        .every(
-          (part) => part is! LlamaImageContent && part is! LlamaAudioContent,
-        );
+    return true;
   }
 
   /// Validates engine is ready for inference.

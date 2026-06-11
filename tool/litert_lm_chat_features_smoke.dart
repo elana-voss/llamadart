@@ -10,13 +10,15 @@ Future<void> main(List<String> args) async {
   if (modelPath == null || modelPath.trim().isEmpty) {
     stderr.writeln(
       'Usage: dart run tool/litert_lm_chat_features_smoke.dart '
-      '<model.litertlm> [cpu|gpu|npu|auto]',
+      '<model.litertlm> [cpu|gpu|npu|auto] [image-path]\n'
+      'Optional env: LITERT_LM_IMAGE_PATH=<local image file>',
     );
     exitCode = 64;
     return;
   }
 
   final backend = args.length > 1 ? _parseBackend(args[1]) : _defaultBackend();
+  final imagePath = _optionalImagePath(args.length > 2 ? args[2] : null);
   final engine = LlamaEngine(LlamaBackend());
   try {
     await engine.loadModel(
@@ -99,17 +101,48 @@ Future<void> main(List<String> args) async {
       toolChoice: ToolChoice.auto,
     );
 
+    final nativeMediaRender = imagePath == null
+        ? null
+        : await _renderNativeMediaPrompt(
+            modelPath: modelPath,
+            backend: backend,
+            imagePath: imagePath,
+          );
+    final multimodal = imagePath == null
+        ? null
+        : await _runScenario(
+            engine: engine,
+            messages: [
+              LlamaChatMessage.withContent(
+                role: LlamaChatRole.user,
+                content: [
+                  const LlamaTextContent(
+                    'Describe the image in one short sentence.',
+                  ),
+                  LlamaImageContent(path: imagePath),
+                ],
+              ),
+            ],
+            tools: const [],
+            enableThinking: false,
+            maxTokens: 96,
+          );
+
     final result = {
       'backendName': await engine.getBackendName(),
       'requestedLiteRtLmBackend': backend.name,
       'thinking': thinking.toJson(),
       'toolCall': toolCall.toJson(),
       'nativeToolHistory': nativeToolHistory.toJson(),
+      if (nativeMediaRender != null)
+        'nativeMediaRender': nativeMediaRender.toJson(),
+      if (multimodal != null) 'multimodal': multimodal.toJson(),
     };
     _verifyResult(
       thinking: thinking,
       toolCall: toolCall,
       nativeToolHistory: nativeToolHistory,
+      multimodal: multimodal,
     );
     print('RESULT litert_lm_chat_features ${jsonEncode(result)}');
   } finally {
@@ -121,6 +154,7 @@ void _verifyResult({
   required _ScenarioResult thinking,
   required _ScenarioResult toolCall,
   required _ScenarioResult nativeToolHistory,
+  _ScenarioResult? multimodal,
 }) {
   if (thinking.thinking.trim().isEmpty) {
     throw StateError('Gemma 4 thinking scenario produced no thinking delta.');
@@ -139,6 +173,9 @@ void _verifyResult({
     nativeToolHistory,
     scenarioName: 'Gemma 4 native tool/history scenario',
   );
+  if (multimodal != null && multimodal.content.trim().isEmpty) {
+    throw StateError('Gemma 4 multimodal scenario produced no content.');
+  }
 }
 
 void _verifyWeatherToolCall(
@@ -209,11 +246,84 @@ Future<_ScenarioResult> _runScenario({
   );
 }
 
+Future<_NativeMediaRenderResult> _renderNativeMediaPrompt({
+  required String modelPath,
+  required LiteRtLmBackendPreference backend,
+  required String imagePath,
+}) async {
+  final client = LiteRtLmRuntimeClient();
+  try {
+    await client.initialize(
+      modelPath: modelPath,
+      backend: _runtimeBackendName(backend),
+      maxTokens: 2048,
+      outputTokens: 32,
+      maxNumImages: 1,
+      speculativeDecoding: false,
+    );
+    client.createConversation(temperature: 0, topK: 1, topP: 1, seed: 1);
+    final rendered = client.renderMessageToString({
+      'role': 'user',
+      'content': [
+        {'type': 'text', 'text': 'Describe the image in one short sentence.'},
+        {'type': 'image', 'path': imagePath},
+      ],
+    });
+    final marker = _firstMediaMarker(rendered);
+    if (marker == null) {
+      throw StateError(
+        'Native Gemma 4 render did not include an image marker. Rendered tail: '
+        '${_tail(rendered)}',
+      );
+    }
+    return _NativeMediaRenderResult(
+      marker: marker,
+      renderedLength: rendered.length,
+      renderedTail: _tail(rendered),
+    );
+  } finally {
+    client.dispose();
+  }
+}
+
+String _runtimeBackendName(LiteRtLmBackendPreference backend) {
+  final nativeName = backend.nativeName;
+  if (nativeName != null) {
+    return nativeName;
+  }
+  return Platform.isAndroid || Platform.isMacOS ? 'gpu' : 'cpu';
+}
+
+String? _firstMediaMarker(String rendered) {
+  for (final marker in const [
+    '<|image|>',
+    '<start_of_image>',
+    '<image_soft_token>',
+  ]) {
+    if (rendered.contains(marker)) {
+      return marker;
+    }
+  }
+  return null;
+}
+
 LiteRtLmBackendPreference _defaultBackend() {
   if (Platform.isAndroid || Platform.isMacOS) {
     return LiteRtLmBackendPreference.gpu;
   }
   return LiteRtLmBackendPreference.cpu;
+}
+
+String? _optionalImagePath(String? argValue) {
+  final value = argValue ?? Platform.environment['LITERT_LM_IMAGE_PATH'];
+  if (value == null || value.trim().isEmpty) {
+    return null;
+  }
+  final image = File(value);
+  if (!image.existsSync()) {
+    throw ArgumentError('LiteRT-LM smoke image does not exist: $value');
+  }
+  return image.path;
 }
 
 LiteRtLmBackendPreference _parseBackend(String value) {
@@ -259,6 +369,24 @@ class _ScenarioResult {
     'thinkingTail': _tail(thinking),
     'toolCallCount': toolCalls.length,
     'toolCalls': toolCalls,
+  };
+}
+
+class _NativeMediaRenderResult {
+  const _NativeMediaRenderResult({
+    required this.marker,
+    required this.renderedLength,
+    required this.renderedTail,
+  });
+
+  final String marker;
+  final int renderedLength;
+  final String renderedTail;
+
+  Map<String, Object?> toJson() => {
+    'marker': marker,
+    'renderedLength': renderedLength,
+    'renderedTail': renderedTail,
   };
 }
 
