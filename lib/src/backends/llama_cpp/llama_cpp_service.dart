@@ -10,6 +10,7 @@ import 'package:path/path.dart' as path;
 import '../../core/llama_logger.dart';
 import '../../core/models/chat/content_part.dart';
 import '../../core/models/config/gpu_backend.dart';
+import '../../core/models/config/gpu_device_info.dart';
 import '../../core/models/config/log_level.dart';
 import '../../core/models/inference/generation_params.dart';
 import '../../core/models/inference/model_params.dart';
@@ -2451,6 +2452,68 @@ class LlamaCppService {
     ptr[devices.length] = nullptr;
     return ptr;
   }
+
+  /// Enumerates the Vulkan backend's offload devices in list order. The
+  /// returned [GpuDeviceInfo.index] is the value to pass as
+  /// [ModelParams.mainGpu] when loading with the Vulkan backend. On a laptop
+  /// with both an integrated and a discrete GPU, both appear here so the
+  /// caller can pin offload to the discrete one. Returns an empty list when
+  /// the Vulkan backend is unavailable.
+  List<GpuDeviceInfo> listGpuDevices() {
+    final regNamePtr = 'Vulkan'.toNativeUtf8();
+    try {
+      final reg = _ggmlBackendRegByName(regNamePtr.cast());
+      if (reg == nullptr) {
+        return const [];
+      }
+      final count = _ggmlBackendRegDevCount(reg);
+      if (count <= 0) {
+        return const [];
+      }
+      final result = <GpuDeviceInfo>[];
+      for (var i = 0; i < count; i++) {
+        final dev = _ggmlBackendRegDevGet(reg, i);
+        if (dev == nullptr) {
+          continue;
+        }
+        final namePtr = ggml_backend_dev_name(dev);
+        final name = namePtr == nullptr
+            ? ''
+            : namePtr.cast<Utf8>().toDartString();
+        final freePtr = malloc<Size>();
+        final totalPtr = malloc<Size>();
+        try {
+          ggml_backend_dev_memory(dev, freePtr, totalPtr);
+          result.add(
+            GpuDeviceInfo(
+              index: i,
+              name: name,
+              type: _mapDeviceType(ggml_backend_dev_type$1(dev)),
+              memoryFreeBytes: freePtr.value,
+              memoryTotalBytes: totalPtr.value,
+            ),
+          );
+        } finally {
+          malloc.free(freePtr);
+          malloc.free(totalPtr);
+        }
+      }
+      return result;
+    } finally {
+      malloc.free(regNamePtr);
+    }
+  }
+
+  GpuDeviceType _mapDeviceType(ggml_backend_dev_type type) => switch (type) {
+    ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_CPU => GpuDeviceType.cpu,
+    ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_GPU =>
+      GpuDeviceType.discreteGpu,
+    ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_IGPU =>
+      GpuDeviceType.integratedGpu,
+    ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_ACCEL =>
+      GpuDeviceType.accelerator,
+    ggml_backend_dev_type.GGML_BACKEND_DEVICE_TYPE_META => GpuDeviceType.meta,
+  };
 
   List<ggml_backend_dev_t>? _resolvePreferredDevices(GpuBackend backend) {
     switch (backend) {
