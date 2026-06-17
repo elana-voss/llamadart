@@ -14,6 +14,15 @@ const _nativeRepoSlug = 'leehack/llamadart-native';
 const _baseUrl =
     'https://github.com/$_nativeRepoSlug/releases/download/$_llamaCppTag';
 
+// Cardwave fork: windows-x64 bundle is fetched from a patched repository.
+// Upstream ggml-vulkan.dll crashes inside cooperative-matrix property queries
+// on NVIDIA Blackwell drivers and AMD AMDVLK integrated GPUs. The override
+// rebuilds ggml-vulkan.dll without COOPMAT support and slims the bundle to
+// cpu+vulkan-only. Non-windows-x64 bundles still come from upstream.
+const _windowsOverrideRepoSlug = 'elana-voss/llamadart-native-overrides';
+const _windowsOverrideBaseUrl =
+    'https://github.com/$_windowsOverrideRepoSlug/releases/download/$_llamaCppTag';
+
 const _packageName = 'llamadart';
 const _thirdPartyDir = 'third_party';
 const _binDir = 'bin';
@@ -497,7 +506,10 @@ Future<void> _downloadReleaseAsset({
   required String destinationPath,
   required Logger log,
 }) async {
-  final url = '$_baseUrl/$assetName';
+  final baseUrl = assetName.contains('windows-x64')
+      ? _windowsOverrideBaseUrl
+      : _baseUrl;
+  final url = '$baseUrl/$assetName';
   log.info('Downloading native bundle: $url');
 
   final destination = File(destinationPath);
